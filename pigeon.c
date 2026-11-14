@@ -2120,6 +2120,7 @@ static int OnCard(HWND d, HWND c)
 }
 
 /* Dark title bar, dark scrollbars/combos/list, flat list without a header */
+static LRESULT CALLBACK LvProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 static void DarkDlg(HWND d)
 {
     BOOL on = TRUE;
@@ -2170,6 +2171,7 @@ static void DarkDlg(HWND d)
             ListView_SetTextBkColor(c, FIELD);
             ListView_SetTextColor(c, INK);
             SetWindowTheme(ListView_GetHeader(c), L"DarkMode_ItemsView", NULL);
+            SetWindowSubclass(c, LvProc, 1, 0);
         }
     }
 }
@@ -2234,6 +2236,62 @@ static LRESULT DrawBtn(NMCUSTOMDRAW *cd)
     }
     SelectObject(dc, of);
     return CDRF_SKIPDEFAULT;
+}
+
+/* List header cell: white text on the field color, thin separator, sort arrow. */
+static LRESULT DrawHdr(NMCUSTOMDRAW *cd)
+{
+    HDC dc = cd->hdc;
+    RECT r = cd->rc;
+    wchar_t text[64];
+    HDITEMW hi;
+    HPEN pen = CreatePen(PS_SOLID, 1, RGB(60, 60, 60)), op;
+    memset(&hi, 0, sizeof hi);
+    hi.mask = HDI_TEXT | HDI_FORMAT;
+    hi.pszText = text;
+    hi.cchTextMax = 64;
+    Header_GetItem(cd->hdr.hwndFrom, (int)cd->dwItemSpec, &hi);
+    FillRect(dc, &r, g_fieldBrush);
+    op = SelectObject(dc, pen);
+    MoveToEx(dc, r.right - 1, r.top + DP(4), NULL);
+    LineTo(dc, r.right - 1, r.bottom - DP(4));
+    SelectObject(dc, op);
+    DeleteObject(pen);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, (cd->uItemState & CDIS_HOT) ? RGB(255, 255, 255) : RGB(235, 235, 235));
+    r.left += DP(6);
+    r.right -= DP(16);
+    DrawTextW(dc, text, -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    if (hi.fmt & (HDF_SORTUP | HDF_SORTDOWN)) {
+        int x = r.right + DP(5), y = (r.top + r.bottom) / 2, a = DP(3), up = (hi.fmt & HDF_SORTUP) != 0;
+        POINT t[3] = {{x - a, up ? y + a / 2 : y - a / 2}, {x + a, up ? y + a / 2 : y - a / 2}, {x, up ? y - a : y + a}};
+        HBRUSH b = CreateSolidBrush(INK);
+        HGDIOBJ ob = SelectObject(dc, b), opn = SelectObject(dc, GetStockObject(NULL_PEN));
+        Polygon(dc, t, 3);
+        SelectObject(dc, ob);
+        SelectObject(dc, opn);
+        DeleteObject(b);
+    }
+    return CDRF_SKIPDEFAULT;
+}
+
+/* Header notifications go to the ListView, not the dialog, so catch them here. */
+static LRESULT CALLBACK LvProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR ref)
+{
+    if (m == WM_NOTIFY) {
+        NMCUSTOMDRAW *cd = (NMCUSTOMDRAW *)l;
+        if (cd->hdr.hwndFrom == ListView_GetHeader(h)) {
+            if (cd->hdr.code == NM_CUSTOMDRAW)
+                return cd->dwDrawStage == CDDS_PREPAINT ? CDRF_NOTIFYITEMDRAW : cd->dwDrawStage == CDDS_ITEMPREPAINT ? DrawHdr(cd) : CDRF_DODEFAULT;
+            if (cd->hdr.code == HDN_ITEMCHANGEDW || cd->hdr.code == HDN_ENDDRAG) {   /* resized/moved: no leftover lines */
+                LRESULT r = DefSubclassProc(h, m, w, l);
+                RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+                return r;
+            }
+        }
+    }
+    if (m == WM_NCDESTROY) RemoveWindowSubclass(h, LvProc, id);
+    return DefSubclassProc(h, m, w, l);
 }
 
 /* Shared by the three dialogs: colors and button drawing. 1 = handled, *ret is the dialog result. */
@@ -2321,7 +2379,8 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
     case WM_NOTIFY: {
         NMCUSTOMDRAW *cd = (NMCUSTOMDRAW *)l;
         wchar_t cls[16];
-        if (cd->hdr.code != NM_CUSTOMDRAW || !GetClassNameW(cd->hdr.hwndFrom, cls, 16) || _wcsicmp(cls, L"Button") != 0) return 0;
+        if (!GetClassNameW(cd->hdr.hwndFrom, cls, 16)) return 0;
+        if (cd->hdr.code != NM_CUSTOMDRAW || _wcsicmp(cls, L"Button") != 0) return 0;
         SetWindowLongPtrW(d, DWLP_MSGRESULT, cd->dwDrawStage == CDDS_PREPAINT ? DrawBtn(cd) : CDRF_DODEFAULT);
         *ret = TRUE;
         return 1;
@@ -2532,7 +2591,7 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         g_settings = d;
         init = 1;
         DarkDlg(d);
-        ListView_SetExtendedListViewStyle(lv, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_HEADERDRAGDROP);   /* drag headers to reorder */
+        ListView_SetExtendedListViewStyle(lv, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_HEADERDRAGDROP | LVS_EX_DOUBLEBUFFER);   /* drag headers to reorder */
         GetClientRect(lv, &rc);
         memset(&c, 0, sizeof c);
         c.mask = LVCF_TEXT | LVCF_WIDTH;
