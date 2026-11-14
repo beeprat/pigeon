@@ -21,6 +21,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <winhttp.h>
+#include <uxtheme.h>
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -33,6 +34,7 @@
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "winhttp.lib")
+#pragma comment(lib, "uxtheme.lib")
 
 #define TIMER_HIDE 2
 #define TIMER_FADE 3
@@ -2036,10 +2038,141 @@ static void AutoStartSet(int on)
     }
 }
 
+/* ---------- Dark dialogs in the popup's look ---------- */
+
+#define FIELD RGB(22, 22, 22)       /* edits, list, buttons: same as the popup's bar buttons */
+#define INK RGB(225, 225, 225)
+static HBRUSH g_bgBrush, g_fieldBrush;
+
+/* Dark title bar, dark scrollbars/combos/list, flat list without a header */
+static void DarkDlg(HWND d)
+{
+    BOOL on = TRUE;
+    COLORREF cap = BG;
+    HWND c;
+    if (!g_bgBrush) { g_bgBrush = CreateSolidBrush(BG); g_fieldBrush = CreateSolidBrush(FIELD); }
+    DwmSetWindowAttribute(d, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &on, sizeof on);
+    DwmSetWindowAttribute(d, 35 /* DWMWA_CAPTION_COLOR, Windows 11 */, &cap, sizeof cap);
+    SendMessageW(d, WM_SETICON, ICON_SMALL, (LPARAM)g_nid.hIcon);
+    for (c = GetWindow(d, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
+        wchar_t cls[32];
+        GetClassNameW(c, cls, 32);
+        int lv = _wcsicmp(cls, WC_LISTVIEWW) == 0;
+        SetWindowTheme(c, _wcsicmp(cls, L"ComboBox") == 0 ? L"DarkMode_CFD" : lv ? L"DarkMode_ItemsView" : L"DarkMode_Explorer", NULL);
+        if (lv || _wcsicmp(cls, L"Edit") == 0) {   /* borderless: WM_PAINT draws a rounded field behind it */
+            SetWindowLongW(c, GWL_STYLE, (GetWindowLongW(c, GWL_STYLE) & ~WS_BORDER) | (lv ? LVS_NOCOLUMNHEADER : 0));
+            SetWindowLongW(c, GWL_EXSTYLE, GetWindowLongW(c, GWL_EXSTYLE) & ~WS_EX_CLIENTEDGE);
+            SetWindowPos(c, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        }
+        if (lv) {
+            ListView_SetBkColor(c, FIELD);
+            ListView_SetTextBkColor(c, FIELD);
+            ListView_SetTextColor(c, INK);
+        }
+    }
+}
+
+/* Push buttons as the popup's rounded buttons, checkboxes as rounded boxes. Returns CDRF_* */
+static LRESULT DrawBtn(NMCUSTOMDRAW *cd)
+{
+    HWND h = cd->hdr.hwndFrom;
+    HDC dc = cd->hdc;
+    RECT r = cd->rc;
+    LONG type = GetWindowLongW(h, GWL_STYLE) & BS_TYPEMASK;
+    int hot = (cd->uItemState & CDIS_HOT) != 0, down = (cd->uItemState & CDIS_SELECTED) != 0;
+    int focus = (cd->uItemState & CDIS_FOCUS) && !(SendMessageW(h, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS);
+    wchar_t text[128];
+    HGDIOBJ of = SelectObject(dc, (HFONT)SendMessageW(h, WM_GETFONT, 0, 0));
+    GetWindowTextW(h, text, 128);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, (cd->uItemState & CDIS_DISABLED) ? RGB(110, 110, 110) : INK);
+    FillRect(dc, &r, g_bgBrush);
+    if (type == BS_CHECKBOX || type == BS_AUTOCHECKBOX) {
+        int bx = DP(15), on = SendMessageW(h, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        RECT b = {r.left, (r.top + r.bottom - bx) / 2, r.left + bx, (r.top + r.bottom - bx) / 2 + bx}, in = b;
+        COLORREF fill = on ? RGB(230, 230, 230) : hot ? RGB(48, 48, 48) : FIELD;
+        if (focus || !on) {             /* thin ring: always on an empty box, so it shows on the dark field */
+            SmoothRound(dc, b, DP(4), focus ? RGB(150, 150, 150) : RGB(80, 80, 80));
+            InflateRect(&in, -DP(1), -DP(1));
+        }
+        SmoothRound(dc, in, DP(3), fill);
+        if (on) {
+            POINT pt[3] = {{b.left + bx * 24 / 100, b.top + bx * 52 / 100}, {b.left + bx * 43 / 100, b.top + bx * 70 / 100}, {b.left + bx * 76 / 100, b.top + bx * 32 / 100}};
+            HPEN pen = CreatePen(PS_SOLID, DP(2), BG), op = SelectObject(dc, pen);
+            Polyline(dc, pt, 3);
+            SelectObject(dc, op);
+            DeleteObject(pen);
+        }
+        r.left += bx + DP(6);
+        DrawTextW(dc, text, -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX);
+    } else {
+        int def = type == BS_DEFPUSHBUTTON;
+        RECT in = r;
+        if (focus || def) {
+            SmoothRound(dc, r, DP(8), focus ? RGB(150, 150, 150) : RGB(90, 90, 90));
+            InflateRect(&in, -DP(1), -DP(1));
+        }
+        SmoothRound(dc, in, DP(7), down ? RGB(64, 64, 64) : hot ? RGB(48, 48, 48) : FIELD);
+        DrawTextW(dc, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX);
+    }
+    SelectObject(dc, of);
+    return CDRF_SKIPDEFAULT;
+}
+
+/* Shared by the three dialogs: colors and button drawing. 1 = handled, *ret is the dialog result. */
+static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
+{
+    switch (m) {
+    case WM_PAINT: {                    /* background, plus a rounded field under each edit and the list */
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(d, &ps);
+        HWND c;
+        FillRect(dc, &ps.rcPaint, g_bgBrush);
+        for (c = GetWindow(d, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
+            wchar_t cls[32];
+            RECT r;
+            GetClassNameW(c, cls, 32);
+            if (!IsWindowVisible(c) || (_wcsicmp(cls, L"Edit") != 0 && _wcsicmp(cls, WC_LISTVIEWW) != 0)) continue;
+            GetWindowRect(c, &r);
+            MapWindowPoints(NULL, d, (POINT *)&r, 2);
+            InflateRect(&r, DP(5), DP(3));
+            SmoothRound(dc, r, DP(8), FIELD);
+        }
+        EndPaint(d, &ps);
+        *ret = TRUE;
+        return g_bgBrush != NULL;
+    }
+    case WM_CTLCOLORDLG:
+        *ret = (INT_PTR)g_bgBrush;
+        return g_bgBrush != NULL;
+    case WM_CTLCOLORSTATIC:
+        SetTextColor((HDC)w, INK);
+        SetBkColor((HDC)w, BG);
+        *ret = (INT_PTR)g_bgBrush;
+        return g_bgBrush != NULL;
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+        SetTextColor((HDC)w, RGB(255, 255, 255));
+        SetBkColor((HDC)w, FIELD);
+        *ret = (INT_PTR)g_fieldBrush;
+        return g_fieldBrush != NULL;
+    case WM_NOTIFY: {
+        NMCUSTOMDRAW *cd = (NMCUSTOMDRAW *)l;
+        wchar_t cls[16];
+        if (cd->hdr.code != NM_CUSTOMDRAW || !GetClassNameW(cd->hdr.hwndFrom, cls, 16) || _wcsicmp(cls, L"Button") != 0) return 0;
+        SetWindowLongPtrW(d, DWLP_MSGRESULT, cd->dwDrawStage == CDDS_PREPAINT ? DrawBtn(cd) : CDRF_DODEFAULT);
+        *ret = TRUE;
+        return 1;
+    }
+    }
+    return 0;
+}
+
 static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
 {
-    (void)l;
-    if (m == WM_INITDIALOG) return TRUE;
+    INT_PTR dr;
+    if (DarkMsg(d, m, w, l, &dr)) return dr;
+    if (m == WM_INITDIALOG) { DarkDlg(d); return TRUE; }
     if (m == WM_COMMAND && LOWORD(w) == 2003) {
         wchar_t we[256], wu[256];
         char e8[256];
@@ -2090,14 +2223,15 @@ static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
 static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
 {
     HWND lv = GetDlgItem(d, IDC_LIST);
-    (void)l;
+    INT_PTR dr;
+    if (DarkMsg(d, m, w, l, &dr)) return dr;
     switch (m) {
     case WM_INITDIALOG: {
         LVCOLUMNW c;
         RECT rc;
         int i;
         g_settings = d;
-        SendMessageW(d, WM_SETICON, ICON_SMALL, (LPARAM)g_nid.hIcon);
+        DarkDlg(d);
         ListView_SetExtendedListViewStyle(lv, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT);
         GetClientRect(lv, &rc);
         memset(&c, 0, sizeof c);
@@ -2442,9 +2576,10 @@ static INT_PTR CALLBACK TestProc(HWND d, UINT m, WPARAM w, LPARAM l)
 {
     const wchar_t *to = g_nacc ? TestTo(g_acc[0].email) : NULL;
     int i;
-    (void)l;
+    INT_PTR dr;
+    if (DarkMsg(d, m, w, l, &dr)) return dr;
     if (m == WM_INITDIALOG) {
-        SendMessageW(d, WM_SETICON, ICON_SMALL, (LPARAM)g_nid.hIcon);
+        DarkDlg(d);
         SetForegroundWindow(d);
         return TRUE;
     }

@@ -4,53 +4,53 @@
 1 ICON "pigeon.ico"
 1 24 "pigeon.manifest"
 
-101 DIALOGEX 0, 0, 260, 290
+101 DIALOGEX 0, 0, 260, 302
 STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_APPWINDOW
 CAPTION "pigeon settings"
 FONT 9, "Segoe UI", 400, 0, 1
 BEGIN
-    LTEXT           "Gmail accounts (checked = notify):", -1, 8, 8, 200, 10
-    CONTROL         "", 1001, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER | WS_BORDER | WS_TABSTOP, 8, 20, 190, 90
+    LTEXT           "Accounts (checked = notify):", -1, 8, 8, 200, 10
+    CONTROL         "", 1001, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER | LVS_NOCOLUMNHEADER | WS_TABSTOP, 10, 22, 186, 86
     PUSHBUTTON      "Add...", 1002, 204, 20, 48, 14
     PUSHBUTTON      "Remove", 1003, 204, 38, 48, 14
     LTEXT           "Popup seconds:", -1, 8, 122, 60, 10
-    EDITTEXT        1004, 70, 120, 30, 13, ES_NUMBER
+    EDITTEXT        1004, 74, 120, 26, 13, ES_NUMBER
     LTEXT           "Corner:", -1, 118, 122, 30, 10
     COMBOBOX        1009, 150, 120, 102, 80, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     AUTOCHECKBOX    "Play sound", 1005, 8, 140, 100, 10
     AUTOCHECKBOX    "Start with Windows", 1010, 118, 140, 120, 10
     AUTOCHECKBOX    "Hold popups during fullscreen apps", 1011, 8, 154, 200, 10
     AUTOCHECKBOX    "Quiet hours from", 1012, 8, 170, 72, 10
-    EDITTEXT        1013, 82, 168, 22, 13, ES_NUMBER
-    LTEXT           "to", -1, 108, 170, 10, 10
-    EDITTEXT        1014, 120, 168, 22, 13, ES_NUMBER
-    LTEXT           "(hour 0-23)", -1, 148, 170, 60, 10
-    LTEXT           "Only notify from (empty = all):", -1, 8, 186, 130, 10
-    EDITTEXT        1015, 140, 184, 112, 13, ES_AUTOHSCROLL
-    LTEXT           "Never notify from:", -1, 8, 202, 130, 10
-    EDITTEXT        1016, 140, 200, 112, 13, ES_AUTOHSCROLL
-    AUTOCHECKBOX    "No popups for Promotions and Social tabs", 1017, 8, 218, 240, 10
-    LTEXT           "Sound file (empty = Windows default):", -1, 8, 232, 200, 10
-    EDITTEXT        1006, 8, 244, 190, 13, ES_AUTOHSCROLL
-    PUSHBUTTON      "Browse...", 1007, 204, 243, 48, 14
-    PUSHBUTTON      "Test", 1008, 8, 268, 50, 14
-    DEFPUSHBUTTON   "Save", IDOK, 148, 268, 50, 14
-    PUSHBUTTON      "Cancel", IDCANCEL, 204, 268, 48, 14
+    EDITTEXT        1013, 86, 168, 20, 13, ES_NUMBER
+    LTEXT           "to", -1, 112, 170, 10, 10
+    EDITTEXT        1014, 126, 168, 20, 13, ES_NUMBER
+    LTEXT           "(hour 0-23)", -1, 154, 170, 60, 10
+    LTEXT           "Only notify from (empty = all):", -1, 8, 190, 130, 10
+    EDITTEXT        1015, 146, 188, 106, 13, ES_AUTOHSCROLL
+    LTEXT           "Never notify from:", -1, 8, 210, 130, 10
+    EDITTEXT        1016, 146, 208, 106, 13, ES_AUTOHSCROLL
+    AUTOCHECKBOX    "No popups for Promotions and Social (Gmail)", 1017, 8, 228, 240, 10
+    LTEXT           "Sound file (empty = Windows default):", -1, 8, 244, 200, 10
+    EDITTEXT        1006, 10, 257, 186, 13, ES_AUTOHSCROLL
+    PUSHBUTTON      "Browse...", 1007, 204, 256, 48, 14
+    PUSHBUTTON      "Test", 1008, 8, 280, 50, 14
+    DEFPUSHBUTTON   "Save", IDOK, 148, 280, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 204, 280, 48, 14
 END
 
-102 DIALOGEX 0, 0, 220, 92
+102 DIALOGEX 0, 0, 220, 96
 STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Add mail account"
 FONT 9, "Segoe UI", 400, 0, 1
 BEGIN
     LTEXT           "Email address:", -1, 8, 8, 200, 10
-    EDITTEXT        2001, 8, 19, 204, 13, ES_AUTOHSCROLL
-    LTEXT           "App password (leave empty for Outlook/Hotmail):", -1, 8, 38, 204, 10
-    EDITTEXT        2002, 8, 49, 204, 13, ES_AUTOHSCROLL | ES_PASSWORD
-    PUSHBUTTON      "Get app password...", 2003, 8, 70, 80, 14
-    DEFPUSHBUTTON   "Add", IDOK, 108, 70, 50, 14
-    PUSHBUTTON      "Cancel", IDCANCEL, 162, 70, 50, 14
+    EDITTEXT        2001, 10, 20, 200, 13, ES_AUTOHSCROLL
+    LTEXT           "App password (leave empty for Outlook/Hotmail):", -1, 8, 39, 204, 10
+    EDITTEXT        2002, 10, 50, 200, 13, ES_AUTOHSCROLL | ES_PASSWORD
+    PUSHBUTTON      "Get app password...", 2003, 8, 74, 80, 14
+    DEFPUSHBUTTON   "Add", IDOK, 108, 74, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 162, 74, 50, 14
 END
 
 103 DIALOGEX 0, 0, 180, 188
