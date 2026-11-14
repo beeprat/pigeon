@@ -2097,6 +2097,7 @@ static const wchar_t *TestTo(const Account *a)
 
 #define WM_LISTSTATE (WM_APP + 7)  /* to Settings: an account's state changed */
 static HWND g_settings;
+static int g_testMode;          /* test buttons and menus: hidden until the code is typed in Settings */
 static int g_editOk;            /* rename asked by F2 or the menu; a slow second click doesn't count */
 
 static int RowAcc(HWND lv, int row)
@@ -2458,9 +2459,7 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
         RECT tr;
         FillRect(dc, &ps.rcPaint, g_bgBrush);
         if (hh) {                       /* header: logo and title where Windows had its title bar */
-            static HICON darkIcon;       /* icon 2: dark pigeon, for the light look; tray keeps icon 1 (taskbar has its own theme) */
-            if (g_light && !darkIcon) darkIcon = LoadImageW(g_inst, MAKEINTRESOURCEW(2), IMAGE_ICON, DP(18), DP(18), 0);
-            DrawIconEx(dc, DP(14), (hh - DP(18)) / 2, g_light && darkIcon ? darkIcon : g_nid.hIcon, DP(18), DP(18), 0, NULL, DI_NORMAL);
+            DrawIconEx(dc, DP(14), (hh - DP(18)) / 2, g_nid.hIcon, DP(18), DP(18), 0, NULL, DI_NORMAL);
             GetWindowTextW(d, title, 64);
             GetClientRect(d, &tr);
             tr.left = DP(42);
@@ -2838,6 +2837,7 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         int i;
         g_settings = d;
         init = 1;
+        ShowWindow(GetDlgItem(d, IDC_TESTPOP), g_testMode ? SW_SHOW : SW_HIDE);
         DarkDlg(d);
         ListView_SetExtendedListViewStyle(lv, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_HEADERDRAGDROP | LVS_EX_DOUBLEBUFFER);   /* drag headers to reorder */
         GetClientRect(lv, &rc);
@@ -3539,8 +3539,10 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
             }
             AppendMenuW(menu, MF_STRING, IDM_PAUSE, NowMs() < g_pauseUntil ? L"Resume popups" : L"Pause popups for 1 hour");
             AppendMenuW(menu, MF_STRING, IDM_SETTINGS, L"Settings...");
-            AppendMenuW(menu, MF_STRING, IDM_TEST, L"Test");
-            AppendMenuW(menu, MF_STRING, IDM_TESTMENU, L"Test menu...");
+            if (g_testMode) {
+                AppendMenuW(menu, MF_STRING, IDM_TEST, L"Test");
+                AppendMenuW(menu, MF_STRING, IDM_TESTMENU, L"Test menu...");
+            }
             AppendMenuW(menu, MF_STRING, IDM_EXIT, L"Exit");
             SetForegroundWindow(h);
             TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, h, NULL);
@@ -3591,6 +3593,25 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
+/* Typing the test code anywhere in Settings turns on test mode for this run */
+static LRESULT CALLBACK CodeHook(int code, WPARAM w, LPARAM l)
+{
+    static const char want[] = "0692005420";
+    static char got[sizeof want];
+    MSG *m = (MSG *)l;
+    if (code >= 0 && w == PM_REMOVE && m->message == WM_CHAR && g_settings && !g_testMode
+        && (m->hwnd == g_settings || IsChild(g_settings, m->hwnd))) {
+        memmove(got, got + 1, sizeof want - 2);
+        got[sizeof want - 2] = (char)m->wParam;
+        if (memcmp(got, want, sizeof want - 1) == 0) {
+            g_testMode = 1;
+            ShowWindow(GetDlgItem(g_settings, IDC_TESTPOP), SW_SHOW);
+            MessageBeep(MB_OK);
+        }
+    }
+    return CallNextHookEx(NULL, code, w, l);
+}
+
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
 {
     WNDCLASSEXW wc;
@@ -3626,6 +3647,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
 
     g_dpi = GetDpiForSystem();          /* manifest says dpiAware, so draw at real size */
     g_taskbarMsg = RegisterWindowMessageW(L"TaskbarCreated");
+    SetWindowsHookExW(WH_GETMESSAGE, CodeHook, NULL, GetCurrentThreadId());
     g_light = wcsstr(cmd, L"--light") ? 1 : wcsstr(cmd, L"--dark") ? 0 : ReadLight();   /* flags: preview either look */
     g_fontBig = MakeFont(DP(-16), FW_NORMAL);
     {
