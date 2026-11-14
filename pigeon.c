@@ -212,31 +212,38 @@ static void LoginCmd(const Account *a, char *cmd, size_t cap)
 /* ---------- Mail providers ---------- */
 
 /* kind: 0 Gmail (X-GM extensions), 1 plain IMAP with app password, 2 Microsoft sign-in (XOAUTH2) */
-typedef struct { const char *dom, *host, *web, *help; int kind; } Provider;
+typedef struct {
+    const char *dom, *host, *web, *help;
+    int kind;
+    const wchar_t *name;        /* shown in Settings' Provider column */
+    COLORREF badge;             /* popup avatar's corner logo: rounded square in this color... */
+    const wchar_t *mark;        /* ...with this text; "" = Gmail's own logo, "~" = a cloud */
+    COLORREF ink;
+} Provider;
 static const Provider g_prov[] = {
-    {"gmail.com",      "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0},
-    {"googlemail.com", "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0},
-    {"yahoo.*",        "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1},
-    {"ymail.com",      "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1},
-    {"rocketmail.com", "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1},
-    {"aol.com",        "imap.aol.com",         "https://mail.aol.com/", "https://login.aol.com/account/security/app-passwords", 1},
-    {"icloud.com",     "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1},
-    {"me.com",         "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1},
-    {"mac.com",        "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1},
-    {"zoho.com",       "imap.zoho.com",        "https://mail.zoho.com/", "https://accounts.zoho.com/home#security/app_password", 1},
-    {"zohomail.com",   "imap.zoho.com",        "https://mail.zoho.com/", "https://accounts.zoho.com/home#security/app_password", 1},
-    {"gmx.com",        "imap.gmx.com",         "https://www.gmx.com/", "https://www.gmx.com/", 1},
-    {"gmx.us",         "imap.gmx.com",         "https://www.gmx.com/", "https://www.gmx.com/", 1},
-    {"gmx.*",          "imap.gmx.net",         "https://www.gmx.net/", "https://www.gmx.net/", 1},
-    {"web.de",         "imap.web.de",          "https://web.de/", "https://web.de/", 1},
-    {"yandex.*",       "imap.yandex.com",      "https://mail.yandex.com/", "https://id.yandex.com/security/app-passwords", 1},
-    {"ya.ru",          "imap.yandex.com",      "https://mail.yandex.com/", "https://id.yandex.com/security/app-passwords", 1},
-    {"fastmail.com",   "imap.fastmail.com",    "https://app.fastmail.com/", "https://app.fastmail.com/settings/security/apps", 1},
-    {"fastmail.fm",    "imap.fastmail.com",    "https://app.fastmail.com/", "https://app.fastmail.com/settings/security/apps", 1},
-    {"outlook.*",      "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2},
-    {"hotmail.*",      "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2},
-    {"live.*",         "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2},
-    {"msn.com",        "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2},
+    {"gmail.com",      "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0, L"Gmail", 0, L"", 0},
+    {"googlemail.com", "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0, L"Gmail", 0, L"", 0},
+    {"yahoo.*",        "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", RGB(96, 1, 210), L"Y!", RGB(255, 255, 255)},
+    {"ymail.com",      "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", RGB(96, 1, 210), L"Y!", RGB(255, 255, 255)},
+    {"rocketmail.com", "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", RGB(96, 1, 210), L"Y!", RGB(255, 255, 255)},
+    {"aol.com",        "imap.aol.com",         "https://mail.aol.com/", "https://login.aol.com/account/security/app-passwords", 1, L"AOL", RGB(51, 102, 255), L"Aol", RGB(255, 255, 255)},
+    {"icloud.com",     "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1, L"iCloud", RGB(0, 122, 255), L"~", RGB(255, 255, 255)},
+    {"me.com",         "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1, L"iCloud", RGB(0, 122, 255), L"~", RGB(255, 255, 255)},
+    {"mac.com",        "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1, L"iCloud", RGB(0, 122, 255), L"~", RGB(255, 255, 255)},
+    {"zoho.com",       "imap.zoho.com",        "https://mail.zoho.com/", "https://accounts.zoho.com/home#security/app_password", 1, L"Zoho", RGB(226, 34, 40), L"Z", RGB(255, 255, 255)},
+    {"zohomail.com",   "imap.zoho.com",        "https://mail.zoho.com/", "https://accounts.zoho.com/home#security/app_password", 1, L"Zoho", RGB(226, 34, 40), L"Z", RGB(255, 255, 255)},
+    {"gmx.com",        "imap.gmx.com",         "https://www.gmx.com/", "https://www.gmx.com/", 1, L"GMX", RGB(28, 68, 155), L"GMX", RGB(255, 255, 255)},
+    {"gmx.us",         "imap.gmx.com",         "https://www.gmx.com/", "https://www.gmx.com/", 1, L"GMX", RGB(28, 68, 155), L"GMX", RGB(255, 255, 255)},
+    {"gmx.*",          "imap.gmx.net",         "https://www.gmx.net/", "https://www.gmx.net/", 1, L"GMX", RGB(28, 68, 155), L"GMX", RGB(255, 255, 255)},
+    {"web.de",         "imap.web.de",          "https://web.de/", "https://web.de/", 1, L"WEB.DE", RGB(255, 213, 0), L"W", RGB(0, 0, 0)},
+    {"yandex.*",       "imap.yandex.com",      "https://mail.yandex.com/", "https://id.yandex.com/security/app-passwords", 1, L"Yandex", RGB(252, 63, 29), L"\x042f", RGB(255, 255, 255)},
+    {"ya.ru",          "imap.yandex.com",      "https://mail.yandex.com/", "https://id.yandex.com/security/app-passwords", 1, L"Yandex", RGB(252, 63, 29), L"\x042f", RGB(255, 255, 255)},
+    {"fastmail.com",   "imap.fastmail.com",    "https://app.fastmail.com/", "https://app.fastmail.com/settings/security/apps", 1, L"Fastmail", RGB(0, 103, 185), L"F", RGB(255, 255, 255)},
+    {"fastmail.fm",    "imap.fastmail.com",    "https://app.fastmail.com/", "https://app.fastmail.com/settings/security/apps", 1, L"Fastmail", RGB(0, 103, 185), L"F", RGB(255, 255, 255)},
+    {"outlook.*",      "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", RGB(0, 120, 212), L"O", RGB(255, 255, 255)},
+    {"hotmail.*",      "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", RGB(0, 120, 212), L"O", RGB(255, 255, 255)},
+    {"live.*",         "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", RGB(0, 120, 212), L"O", RGB(255, 255, 255)},
+    {"msn.com",        "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", RGB(0, 120, 212), L"O", RGB(255, 255, 255)},
 };
 
 /* Provider by the address's domain. "x.*" matches any ending. Unknown domains are Gmail: Google Workspace uses custom domains. */
@@ -687,7 +694,7 @@ static int TextW(HFONT f, const wchar_t *t);
 
 /* Gmail-style letter avatar: colored circle with the sender's initial, small provider badge bottom right
    (kind: Gmail logo for 0, blue "O" for Microsoft, none otherwise) */
-static void DrawAvatar(HDC dc, int x, int y, int d, const wchar_t *name, int kind)
+static void DrawAvatar(HDC dc, int x, int y, int d, const wchar_t *name, const Provider *pv)
 {
     static const COLORREF pal[] = {RGB(66,133,244), RGB(219,68,55), RGB(244,160,0), RGB(15,157,88),
                                    RGB(171,71,188), RGB(0,172,193), RGB(255,112,67), RGB(92,107,192)};
@@ -720,11 +727,11 @@ static void DrawAvatar(HDC dc, int x, int y, int d, const wchar_t *name, int kin
     DrawTextW(m, ch, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     SelectObject(m, of);
     DeleteObject(f);
-    if (kind == 2) {   /* Outlook: blue rounded square with a white O, BG-colored outline */
+    if (pv->mark[0]) {   /* rounded square in the provider's color with its mark, BG-colored outline */
         int ow = DP(3) * S, lw = DP(BADGE - 2) * S, ox = D + E - lw - ow / 2, oy = D - lw - ow / 2;
         RECT br = {ox, oy, ox + lw, oy + lw};
         HPEN pen = CreatePen(PS_SOLID, ow * 2, BG);
-        b = CreateSolidBrush(RGB(0, 120, 212));
+        b = CreateSolidBrush(pv->badge);
         SelectObject(m, pen);
         SelectObject(m, b);
         RoundRect(m, br.left, br.top, br.right, br.bottom, lw / 3, lw / 3);
@@ -733,12 +740,26 @@ static void DrawAvatar(HDC dc, int x, int y, int d, const wchar_t *name, int kin
         SelectObject(m, GetStockObject(NULL_BRUSH));
         DeleteObject(b);
         DeleteObject(pen);
-        f = MakeFont(-lw * 70 / 100, FW_BOLD);
-        of = SelectObject(m, f);
-        DrawTextW(m, L"O", 1, &br, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        SelectObject(m, of);
-        DeleteObject(f);
-    } else if (kind == 0) {   /* small Gmail logo bottom right, drawn over the circle with a BG-colored outline */
+        if (wcscmp(pv->mark, L"~") == 0) {   /* cloud: three bumps on a flat base */
+            int u = lw / 12, cx = br.left + lw / 2, cy = br.top + lw * 55 / 100;
+            b = CreateSolidBrush(pv->ink);
+            SelectObject(m, b);
+            Ellipse(m, cx - 5 * u, cy - 2 * u, cx - u, cy + 2 * u + 1);
+            Ellipse(m, cx - 3 * u, cy - 5 * u, cx + 3 * u, cy + u);
+            Ellipse(m, cx + u, cy - 3 * u, cx + 5 * u, cy + 2 * u + 1);
+            Rectangle(m, cx - 3 * u, cy - u, cx + 3 * u, cy + 2 * u + 1);
+            SelectObject(m, GetStockObject(NULL_BRUSH));
+            DeleteObject(b);
+        } else {
+            int len = (int)wcslen(pv->mark);   /* longer marks get a smaller font so they fit */
+            f = MakeFont(-lw * (len == 1 ? 70 : len == 2 ? 55 : 38) / 100, FW_BOLD);
+            of = SelectObject(m, f);
+            SetTextColor(m, pv->ink);
+            DrawTextW(m, pv->mark, -1, &br, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            SelectObject(m, of);
+            DeleteObject(f);
+        }
+    } else {   /* small Gmail logo bottom right, drawn over the circle with a BG-colored outline */
         static const POINT src[5][8] = {
             {{0,10},{10,10},{10,33},{0,33}},
             {{34,10},{44,10},{44,33},{34,33}},
@@ -1060,7 +1081,7 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         {
             int pad = DP(PAD), av = DP(AV), ch = g_ph;
             int tb = g_h1 + g_h2 + (g_to[0] ? g_h3 : 0) + (g_prev[0] ? g_h3 : 0), ty = (ch - tb) / 2;
-            DrawAvatar(dc, pad, (ch - av) / 2, av, g_text, g_cur.acc ? Prov(g_cur.acc->email)->kind : 0);
+            DrawAvatar(dc, pad, (ch - av) / 2, av, g_text, Prov(g_cur.acc ? g_cur.acc->email : ""));
             SetBkMode(dc, TRANSPARENT);
             tr.left = pad + av + DP(GAP); tr.right = rc.right - pad;
             of = SelectObject(dc, g_font);
@@ -2224,14 +2245,8 @@ static void ListAdd(HWND lv, int i)
     {
         const Provider *pv = Prov(g_acc[i].email);
         const char *at = strrchr(g_acc[i].email, '@');
-        size_t n;
-        if (pv->kind == 2) wcscpy_s(w, 256, L"Outlook");
-        else if (pv->kind == 0) wcscpy_s(w, 256, at && (_stricmp(at, "@gmail.com") == 0 || _stricmp(at, "@googlemail.com") == 0) ? L"Gmail" : L"Workspace");
-        else {                          /* "yahoo.*" -> Yahoo */
-            n = strcspn(pv->dom, ".");
-            swprintf_s(w, 256, L"%.*hs", (int)n, pv->dom);
-            w[0] = towupper(w[0]);
-        }
+        if (pv->kind == 0) wcscpy_s(w, 256, at && (_stricmp(at, "@gmail.com") == 0 || _stricmp(at, "@googlemail.com") == 0) ? L"Gmail" : L"Workspace");
+        else wcscpy_s(w, 256, pv->name);
         ListView_SetItemText(lv, it.iItem, 2, w);
     }
 }
