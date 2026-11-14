@@ -615,7 +615,17 @@ typedef struct { wchar_t from[256], subj[256], url[512], to[256], prev[300]; Acc
 static NewMail g_cur;           /* mail shown in the popup now */
 static void PopupAction(int b);
 static void ShowNext(void);
-#define BG RGB(32, 32, 32)
+static int g_light;             /* Windows apps mode is light: we follow it */
+/* A grey picked for the dark look; in light mode the mirror shade, so contrast stays the same */
+static COLORREF Gr(int v) { return g_light ? RGB(255 - v, 255 - v, 255 - v) : RGB(v, v, v); }
+#define BG (g_light ? RGB(243, 243, 243) : RGB(32, 32, 32))
+
+static int ReadLight(void)
+{
+    DWORD v = 0, n = sizeof v;
+    return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                        L"AppsUseLightTheme", RRF_RT_REG_DWORD, NULL, &v, &n) == ERROR_SUCCESS && v;
+}
 
 static void FillPoly(HDC m, COLORREF c, POINT *pt, int n)
 {
@@ -850,21 +860,21 @@ static void DrawButtons(HWND h, HDC dc)
     static const wchar_t glyph[NBTN] = {0xE8C3, 0xE7B8, 0xE734, 0xE823};   /* read, archive, star, clock */
     HGDIOBJ of;
     int i;
-    if (HASBAR) for (i = 0; i < NBTN; i++) SmoothRound(dc, BtnRect(h, i), DP(8), BarFade(i == g_hot ? RGB(48, 48, 48) : RGB(22, 22, 22)));
+    if (HASBAR) for (i = 0; i < NBTN; i++) SmoothRound(dc, BtnRect(h, i), DP(8), BarFade(i == g_hot ? Gr(48) : Gr(22)));
     of = SelectObject(dc, g_fontIcon);
     SetBkMode(dc, TRANSPARENT);
     static const wchar_t *times[NBTN] = {L"10 min", L"1 hour", L"3 hours", L"8 hours"};
     if (g_snzMode) SelectObject(dc, g_fontSmall);
     for (i = 0; i < (HASBAR ? NBTN : 0); i++) {
         RECT r = BtnRect(h, i);
-        SetTextColor(dc, BarFade(i == g_hot ? RGB(255, 255, 255) : RGB(160, 160, 160)));
+        SetTextColor(dc, BarFade(i == g_hot ? Gr(255) : Gr(160)));
         if (g_snzMode) DrawTextW(dc, times[i], -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         else DrawTextW(dc, &glyph[i], 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
     {
         RECT r = CloseRect(h);
         static const wchar_t x = 0xE711;    /* ChromeClose */
-        COLORREF bg = g_hot == NBTN ? RGB(60, 60, 60) : BG, fg = g_hot == NBTN ? RGB(255, 255, 255) : RGB(140, 140, 140);
+        COLORREF bg = g_hot == NBTN ? Gr(60) : BG, fg = g_hot == NBTN ? Gr(255) : Gr(140);
         SmoothRound(dc, r, DP(6), HASBAR ? BarFade(bg) : bg);   /* no bar without mail: the cross shows at once */
         SelectObject(dc, g_fontIconS);
         SetTextColor(dc, HASBAR ? BarFade(fg) : fg);
@@ -988,7 +998,7 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         buf = CreateCompatibleBitmap(pdc, rc.right, rc.bottom);
         obuf = SelectObject(dc, buf);
         b = CreateSolidBrush(BG);
-        pen = g_dwm ? CreatePen(PS_NULL, 0, 0) : CreatePen(PS_INSIDEFRAME, 1, RGB(80, 80, 80));
+        pen = g_dwm ? CreatePen(PS_NULL, 0, 0) : CreatePen(PS_INSIDEFRAME, 1, Gr(80));
         ob = SelectObject(dc, b);
         op = SelectObject(dc, pen);
         RoundRect(dc, 0, 0, rc.right + (g_dwm ? 1 : 0), rc.bottom + (g_dwm ? 1 : 0), DP(16), DP(16));
@@ -1004,11 +1014,11 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
             SetBkMode(dc, TRANSPARENT);
             tr.left = pad + av + DP(GAP); tr.right = rc.right - pad;
             of = SelectObject(dc, g_font);
-            SetTextColor(dc, RGB(190, 190, 190));
+            SetTextColor(dc, Gr(190));
             tr.top = ty; tr.bottom = ty + g_h1;
             DrawTextW(dc, g_text, -1, &tr, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             SelectObject(dc, g_subjHot ? g_fontBigU : g_fontBig);
-            SetTextColor(dc, RGB(255, 255, 255));
+            SetTextColor(dc, Gr(255));
             tr.top = tr.bottom; tr.bottom = tr.top + g_h2;
             DrawTextW(dc, g_subj, -1, &tr, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             g_subjRect = tr;            /* hit area: only as wide as the text */
@@ -1016,13 +1026,13 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
             if (g_subjRect.right > tr.right) g_subjRect.right = tr.right;
             if (g_prev[0]) {
                 SelectObject(dc, g_fontSmall);
-                SetTextColor(dc, RGB(165, 165, 165));
+                SetTextColor(dc, Gr(165));
                 tr.top = tr.bottom; tr.bottom = tr.top + g_h3;
                 DrawTextW(dc, g_prev, -1, &tr, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             }
             if (g_to[0]) {                      /* faint: which address got it */
                 SelectObject(dc, g_fontSmall);
-                SetTextColor(dc, RGB(125, 125, 125));
+                SetTextColor(dc, Gr(125));
                 tr.top = tr.bottom; tr.bottom = tr.top + g_h3;
                 DrawTextW(dc, g_to, -1, &tr, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             }
@@ -2157,9 +2167,9 @@ static void AutoStartSet(int on)
 
 /* ---------- Dark dialogs in the popup's look ---------- */
 
-#define FIELD RGB(22, 22, 22)       /* edits, list, buttons: same as the popup's bar buttons */
-#define INK RGB(225, 225, 225)
-#define CARD RGB(43, 43, 43)        /* section cards: hidden statics 4000-4099 mark where */
+#define FIELD (g_light ? RGB(236, 236, 236) : RGB(22, 22, 22))   /* edits, list, buttons: same as the popup's bar buttons */
+#define INK Gr(225)
+#define CARD (g_light ? RGB(255, 255, 255) : RGB(43, 43, 43))     /* section cards: hidden statics 4000-4099 mark where */
 #define IDC_XCLOSE 999              /* our own close button in the header */
 static HBRUSH g_bgBrush, g_fieldBrush, g_cardBrush;
 static HFONT g_hdrFont;
@@ -2187,13 +2197,17 @@ static void DarkDlg(HWND d)
     RECT wr, cr;
     POINT o = {0, 0};
     int dx, dy, round = 2 /* DWMWCP_ROUND */;
-    COLORREF edge = RGB(58, 58, 58);
-    if (!g_bgBrush) {
+    COLORREF edge = Gr(58);
+    static int brushLight = -1;
+    if (brushLight != g_light) {        /* first dialog, or Windows switched light/dark since */
+        if (g_bgBrush) { DeleteObject(g_bgBrush); DeleteObject(g_fieldBrush); DeleteObject(g_cardBrush); }
         g_bgBrush = CreateSolidBrush(BG);
         g_fieldBrush = CreateSolidBrush(FIELD);
         g_cardBrush = CreateSolidBrush(CARD);
-        g_hdrFont = MakeFont(-DP(15), FW_SEMIBOLD);
+        brushLight = g_light;
     }
+    if (!g_hdrFont) g_hdrFont = MakeFont(-DP(15), FW_SEMIBOLD);
+    on = !g_light;
     DwmSetWindowAttribute(d, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &on, sizeof on);
     DwmSetWindowAttribute(d, 35 /* DWMWA_CAPTION_COLOR, Windows 11 */, &cap, sizeof cap);
     DwmSetWindowAttribute(d, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, &round, sizeof round);
@@ -2218,7 +2232,7 @@ static void DarkDlg(HWND d)
         wchar_t cls[32];
         GetClassNameW(c, cls, 32);
         int lv = _wcsicmp(cls, WC_LISTVIEWW) == 0;
-        SetWindowTheme(c, _wcsicmp(cls, L"ComboBox") == 0 ? L"DarkMode_CFD" : lv ? L"DarkMode_ItemsView" : L"DarkMode_Explorer", NULL);
+        SetWindowTheme(c, g_light ? L"Explorer" : _wcsicmp(cls, L"ComboBox") == 0 ? L"DarkMode_CFD" : lv ? L"DarkMode_ItemsView" : L"DarkMode_Explorer", NULL);
         if (lv || _wcsicmp(cls, L"Edit") == 0) {   /* borderless: WM_PAINT draws a rounded field behind it */
             SetWindowLongW(c, GWL_STYLE, GetWindowLongW(c, GWL_STYLE) & ~WS_BORDER);
             SetWindowLongW(c, GWL_EXSTYLE, GetWindowLongW(c, GWL_EXSTYLE) & ~WS_EX_CLIENTEDGE);
@@ -2246,7 +2260,7 @@ static void DarkDlg(HWND d)
             ListView_SetBkColor(c, FIELD);
             ListView_SetTextBkColor(c, FIELD);
             ListView_SetTextColor(c, INK);
-            SetWindowTheme(ListView_GetHeader(c), L"DarkMode_ItemsView", NULL);
+            SetWindowTheme(ListView_GetHeader(c), g_light ? L"ItemsView" : L"DarkMode_ItemsView", NULL);
             SetWindowSubclass(c, LvProc, 1, 0);
         }
     }
@@ -2265,13 +2279,13 @@ static LRESULT DrawBtn(NMCUSTOMDRAW *cd)
     HGDIOBJ of = SelectObject(dc, (HFONT)SendMessageW(h, WM_GETFONT, 0, 0));
     GetWindowTextW(h, text, 128);
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, (cd->uItemState & CDIS_DISABLED) ? RGB(110, 110, 110) : INK);
+    SetTextColor(dc, (cd->uItemState & CDIS_DISABLED) ? Gr(110) : INK);
     FillRect(dc, &r, OnCard(GetParent(h), h) ? g_cardBrush : g_bgBrush);
     if (GetDlgCtrlID(h) == IDC_XCLOSE) {    /* header close: an X, a soft square on hover */
         /* X from square dots on both diagonals: mirror-exact */
         int n = DP(10), t = DP(1) + 1, x0 = (r.left + r.right - n - t) / 2, y0 = (r.top + r.bottom - n - t) / 2, i;
         HBRUSH ink = CreateSolidBrush(INK);
-        if (hot || down) SmoothRound(dc, r, DP(6), down ? RGB(70, 70, 70) : RGB(55, 55, 55));
+        if (hot || down) SmoothRound(dc, r, DP(6), down ? Gr(70) : Gr(55));
         for (i = 0; i <= n; i++) {
             RECT p1 = {x0 + i, y0 + i, x0 + i + t, y0 + i + t}, p2 = {x0 + n - i, y0 + i, x0 + n - i + t, y0 + i + t};
             FillRect(dc, &p1, ink);
@@ -2281,35 +2295,35 @@ static LRESULT DrawBtn(NMCUSTOMDRAW *cd)
     } else if (type == BS_CHECKBOX || type == BS_AUTOCHECKBOX) {   /* a switch */
         int sw = DP(32), sh = DP(18), on = SendMessageW(h, BM_GETCHECK, 0, 0) == BST_CHECKED, kd = sh - DP(6), kx;
         RECT b = {r.left, (r.top + r.bottom - sh) / 2, r.left + sw, (r.top + r.bottom - sh) / 2 + sh}, k;
-        if (focus) { RECT f = b; InflateRect(&f, DP(2), DP(2)); SmoothRound(dc, f, (sh + DP(4)) / 2, RGB(150, 150, 150)); }
-        SmoothRound(dc, b, sh / 2, on ? RGB(235, 235, 235) : hot ? RGB(95, 95, 95) : RGB(75, 75, 75));
+        if (focus) { RECT f = b; InflateRect(&f, DP(2), DP(2)); SmoothRound(dc, f, (sh + DP(4)) / 2, Gr(150)); }
+        SmoothRound(dc, b, sh / 2, on ? Gr(235) : hot ? Gr(95) : Gr(75));
         kx = on ? b.right - DP(3) - kd : b.left + DP(3);
         SetRect(&k, kx, b.top + DP(3), kx + kd, b.top + DP(3) + kd);
-        SmoothRound(dc, k, kd / 2, on ? BG : RGB(210, 210, 210));
+        SmoothRound(dc, k, kd / 2, on ? BG : g_light ? RGB(255, 255, 255) : Gr(210));   /* off knob: always the light one */
         r.left += sw + DP(8);
         DrawTextW(dc, text, -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX);
     } else if (type == BS_RADIOBUTTON || type == BS_AUTORADIOBUTTON) {   /* corner picker: a little screen, dot in the corner */
         int on = SendMessageW(h, BM_GETCHECK, 0, 0) == BST_CHECKED, k = GetDlgCtrlID(h) - IDC_CORNER0;
         int sw = DP(20), sh = DP(14), dd = DP(5), x0 = (r.left + r.right - sw) / 2, y0 = (r.top + r.bottom - sh) / 2;
         RECT in = r, sc = {x0, y0, x0 + sw, y0 + sh}, sci = sc, dot;
-        if (focus) { SmoothRound(dc, r, DP(8), RGB(150, 150, 150)); InflateRect(&in, -DP(1), -DP(1)); }
-        SmoothRound(dc, in, DP(7), on ? RGB(80, 80, 80) : hot ? RGB(48, 48, 48) : FIELD);
-        SmoothRound(dc, sc, DP(3), on ? INK : RGB(130, 130, 130));
+        if (focus) { SmoothRound(dc, r, DP(8), Gr(150)); InflateRect(&in, -DP(1), -DP(1)); }
+        SmoothRound(dc, in, DP(7), on ? Gr(80) : hot ? Gr(48) : FIELD);
+        SmoothRound(dc, sc, DP(3), on ? INK : Gr(130));
         InflateRect(&sci, -DP(1) - 1, -DP(1) - 1);
-        SmoothRound(dc, sci, DP(2), on ? RGB(80, 80, 80) : hot ? RGB(48, 48, 48) : FIELD);
+        SmoothRound(dc, sci, DP(2), on ? Gr(80) : hot ? Gr(48) : FIELD);
         dot.left = (k == 0 || k == 2) ? sci.right - DP(2) - dd : sci.left + DP(2);
         dot.top = k >= 2 ? sci.bottom - DP(2) - dd : sci.top + DP(2);
         dot.right = dot.left + dd;
         dot.bottom = dot.top + dd;
-        SmoothRound(dc, dot, DP(1), on ? INK : RGB(150, 150, 150));
+        SmoothRound(dc, dot, DP(1), on ? INK : Gr(150));
     } else {
         int def = type == BS_DEFPUSHBUTTON;
         RECT in = r;
         if (focus || def) {
-            SmoothRound(dc, r, DP(8), focus ? RGB(150, 150, 150) : RGB(90, 90, 90));
+            SmoothRound(dc, r, DP(8), focus ? Gr(150) : Gr(90));
             InflateRect(&in, -DP(1), -DP(1));
         }
-        SmoothRound(dc, in, DP(7), down ? RGB(64, 64, 64) : hot ? RGB(48, 48, 48) : FIELD);
+        SmoothRound(dc, in, DP(7), down ? Gr(64) : hot ? Gr(48) : FIELD);
         DrawTextW(dc, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX);
     }
     SelectObject(dc, of);
@@ -2323,7 +2337,7 @@ static LRESULT DrawHdr(NMCUSTOMDRAW *cd)
     RECT r = cd->rc;
     wchar_t text[64];
     HDITEMW hi;
-    HPEN pen = CreatePen(PS_SOLID, 1, RGB(60, 60, 60)), op;
+    HPEN pen = CreatePen(PS_SOLID, 1, Gr(60)), op;
     memset(&hi, 0, sizeof hi);
     hi.mask = HDI_TEXT | HDI_FORMAT;
     hi.pszText = text;
@@ -2336,7 +2350,7 @@ static LRESULT DrawHdr(NMCUSTOMDRAW *cd)
     SelectObject(dc, op);
     DeleteObject(pen);
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, (cd->uItemState & CDIS_HOT) ? RGB(255, 255, 255) : RGB(235, 235, 235));
+    SetTextColor(dc, (cd->uItemState & CDIS_HOT) ? Gr(255) : Gr(235));
     r.left += DP(6);
     r.right -= DP(16);
     DrawTextW(dc, text, -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
@@ -2425,7 +2439,7 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
             tr.bottom = hh;
             SelectObject(dc, g_hdrFont);
             SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, RGB(245, 245, 245));
+            SetTextColor(dc, Gr(245));
             DrawTextW(dc, title, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         }
         for (c = GetWindow(d, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {   /* cards first, fields go on top */
@@ -2454,7 +2468,7 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
         return g_bgBrush != NULL;
     case WM_CTLCOLORSTATIC: {
         int card = OnCard(d, (HWND)l), id = GetDlgCtrlID((HWND)l);
-        SetTextColor((HDC)w, id >= 4100 && id < 4200 ? RGB(150, 150, 150) : INK);   /* 4100-4199: section titles */
+        SetTextColor((HDC)w, id >= 4100 && id < 4200 ? Gr(150) : INK);   /* 4100-4199: section titles */
         SetBkColor((HDC)w, card ? CARD : BG);
         *ret = (INT_PTR)(card ? g_cardBrush : g_bgBrush);
         return g_bgBrush != NULL;
@@ -2483,7 +2497,7 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
         return 0;
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX:
-        SetTextColor((HDC)w, RGB(255, 255, 255));
+        SetTextColor((HDC)w, Gr(255));
         SetBkColor((HDC)w, FIELD);
         *ret = (INT_PTR)g_fieldBrush;
         return g_fieldBrush != NULL;
@@ -2800,12 +2814,12 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
                 RECT b = {0, 0, sz, sz}, in;
                 FillRect(mdc, &b, g_fieldBrush);
                 InflateRect(&b, -DP(2), -DP(2));
-                SmoothRound(mdc, b, DP(3), k ? RGB(240, 240, 240) : RGB(140, 140, 140));
+                SmoothRound(mdc, b, DP(3), k ? Gr(240) : Gr(140));
                 in = b;
                 InflateRect(&in, -DP(1) - 1, -DP(1) - 1);
                 if (!k) SmoothRound(mdc, in, DP(2), FIELD);
                 else {
-                    HPEN pen = CreatePen(PS_SOLID, DP(2), RGB(20, 20, 20));
+                    HPEN pen = CreatePen(PS_SOLID, DP(2), Gr(20));
                     HGDIOBJ op = SelectObject(mdc, pen);
                     MoveToEx(mdc, b.left + DP(3), b.top + DP(6), NULL);
                     LineTo(mdc, b.left + DP(5), b.top + DP(8));
@@ -3491,6 +3505,9 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (LOWORD(w) == IDM_TEST) { memset(&g_cur, 0, sizeof g_cur); ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(&g_acc[0]) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?"); PlayNotify(); }
         if (LOWORD(w) == IDM_EXIT) DestroyWindow(h);
         return 0;
+    case WM_SETTINGCHANGE:              /* light/dark switched: windows opened from now on follow */
+        if (l && wcscmp((const wchar_t *)l, L"ImmersiveColorSet") == 0) g_light = ReadLight();
+        break;
     case WM_DESTROY:
         Shell_NotifyIconW(NIM_DELETE, &g_nid);
         if (g_badgeIcon) DestroyIcon(g_badgeIcon);
@@ -3534,6 +3551,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
     RegisterClassExW(&wc);
 
     g_dpi = GetDpiForSystem();          /* manifest says dpiAware, so draw at real size */
+    g_light = wcsstr(cmd, L"--light") ? 1 : wcsstr(cmd, L"--dark") ? 0 : ReadLight();   /* flags: preview either look */
     g_fontBig = MakeFont(DP(-16), FW_NORMAL);
     {
         LOGFONTW lf;
@@ -3572,7 +3590,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
                               WS_POPUP, 0, 0, 10, 10, NULL, NULL, hInst, NULL);
     {
         DWORD corner = 2;                   /* DWMWCP_ROUND */
-        COLORREF border = RGB(75, 75, 75);
+        COLORREF border = Gr(75);
         g_dwm = SUCCEEDED(DwmSetWindowAttribute(g_popup, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, &corner, sizeof corner));
         if (g_dwm) DwmSetWindowAttribute(g_popup, 34 /* DWMWA_BORDER_COLOR */, &border, sizeof border);
         if (g_dwm) {    /* the popup always uses a region (see VisTop): turn off DWM's corners and border, which would outline the hidden bar area */
