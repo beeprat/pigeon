@@ -20,6 +20,7 @@
 #include <wincrypt.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <winhttp.h>
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -31,6 +32,7 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "winhttp.lib")
 
 #define TIMER_HIDE 2
 #define TIMER_FADE 3
@@ -45,6 +47,7 @@ static int g_alpha = 255;       /* popup opacity during fade-out */
 #define WM_NEXTMAIL (WM_APP + 3)   /* popup closed: show the next queued mail */
 #define WM_NEWMAIL (WM_APP + 2)    /* from the IMAP thread, lParam = NewMail* */
 #define WM_UNREAD (WM_APP + 4)     /* from the IMAP thread: an unread count changed */
+#define WM_SAVECFG (WM_APP + 5)    /* from the IMAP thread: Microsoft sent a new refresh token */
 #define IDM_EXIT 101
 #define IDM_TEST 102
 #define IDM_SETTINGS 103
@@ -77,9 +80,10 @@ static HANDLE g_mutex;
 static HINSTANCE g_inst;
 
 #define MAX_ACC 8
+#define PASSMAX 4096            /* app password or Microsoft refresh token; multiple of 16 for CryptProtectMemory */
 typedef struct Account Account;
 struct Account {
-    char email[256], pass[128];
+    char email[256], pass[PASSMAX];
     int enabled;                /* notifications on for this account */
     volatile SOCKET sock;       /* live IMAP socket, for ImapKick */
     volatile int state;         /* 0 connecting, 1 connected, 2 offline, 3 login failed */
@@ -116,7 +120,7 @@ static int Protect(const char *pass, char *hex, size_t cap)
 
 static int Unprotect(const char *hex, char *pass, size_t cap)
 {
-    BYTE buf[2048];
+    static BYTE buf[PASSMAX + 2048];
     DATA_BLOB in, out;
     size_t i, n = strlen(hex) / 2;
     if (n == 0 || n > sizeof buf) return 0;
@@ -138,12 +142,15 @@ static int Unprotect(const char *hex, char *pass, size_t cap)
 }
 
 /* Account.pass is kept encrypted in memory (CryptProtectMemory); plain text only lives in short local buffers. */
-static void PassSeal(char *pass)   { CryptProtectMemory(pass, 128, CRYPTPROTECTMEMORY_SAME_PROCESS); }
+static SRWLOCK g_passLock = SRWLOCK_INIT;
+static void PassSeal(char *pass)   { CryptProtectMemory(pass, PASSMAX, CRYPTPROTECTMEMORY_SAME_PROCESS); }
 static void PassOpen(const char *sealed, char *plain)
 {
-    memcpy(plain, sealed, 128);
-    if (!CryptUnprotectMemory(plain, 128, CRYPTPROTECTMEMORY_SAME_PROCESS)) plain[0] = 0;
-    plain[127] = 0;
+    AcquireSRWLockShared(&g_passLock);
+    memcpy(plain, sealed, PASSMAX);
+    ReleaseSRWLockShared(&g_passLock);
+    if (!CryptUnprotectMemory(plain, PASSMAX, CRYPTPROTECTMEMORY_SAME_PROCESS)) plain[0] = 0;
+    plain[PASSMAX - 1] = 0;
 }
 
 /* Appends s as an IMAP quoted string ("..." with \ and " escaped). */
@@ -162,7 +169,7 @@ static void QuoteTo(char *o, size_t cap, const char *s)
 /* "LOGIN <email> <pass>" with both quoted; caller wipes cmd after sending. */
 static void LoginCmd(const Account *a, char *cmd, size_t cap)
 {
-    char plain[128];
+    char plain[PASSMAX];
     PassOpen(a->pass, plain);
     strcpy_s(cmd, cap, "LOGIN ");
     QuoteTo(cmd, cap, a->email);
@@ -171,11 +178,236 @@ static void LoginCmd(const Account *a, char *cmd, size_t cap)
     SecureZeroMemory(plain, sizeof plain);
 }
 
+/* ---------- Mail providers ---------- */
+
+/* kind: 0 Gmail (X-GM extensions), 1 plain IMAP with app password, 2 Microsoft sign-in (XOAUTH2) */
+typedef struct { const char *dom, *host, *web, *help; int kind; } Provider;
+static const Provider g_prov[] = {
+    {"gmail.com",      "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0},
+    {"googlemail.com", "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0},
+    {"yahoo.*",        "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1},
+    {"ymail.com",      "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1},
+    {"rocketmail.com", "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1},
+    {"aol.com",        "imap.aol.com",         "https://mail.aol.com/", "https://login.aol.com/account/security/app-passwords", 1},
+    {"icloud.com",     "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1},
+    {"me.com",         "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1},
+    {"mac.com",        "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1},
+    {"zoho.com",       "imap.zoho.com",        "https://mail.zoho.com/", "https://accounts.zoho.com/home#security/app_password", 1},
+    {"zohomail.com",   "imap.zoho.com",        "https://mail.zoho.com/", "https://accounts.zoho.com/home#security/app_password", 1},
+    {"gmx.com",        "imap.gmx.com",         "https://www.gmx.com/", "https://www.gmx.com/", 1},
+    {"gmx.us",         "imap.gmx.com",         "https://www.gmx.com/", "https://www.gmx.com/", 1},
+    {"gmx.*",          "imap.gmx.net",         "https://www.gmx.net/", "https://www.gmx.net/", 1},
+    {"web.de",         "imap.web.de",          "https://web.de/", "https://web.de/", 1},
+    {"yandex.*",       "imap.yandex.com",      "https://mail.yandex.com/", "https://id.yandex.com/security/app-passwords", 1},
+    {"ya.ru",          "imap.yandex.com",      "https://mail.yandex.com/", "https://id.yandex.com/security/app-passwords", 1},
+    {"fastmail.com",   "imap.fastmail.com",    "https://app.fastmail.com/", "https://app.fastmail.com/settings/security/apps", 1},
+    {"fastmail.fm",    "imap.fastmail.com",    "https://app.fastmail.com/", "https://app.fastmail.com/settings/security/apps", 1},
+    {"outlook.*",      "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2},
+    {"hotmail.*",      "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2},
+    {"live.*",         "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2},
+    {"msn.com",        "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2},
+};
+
+/* Provider by the address's domain. "x.*" matches any ending. Unknown domains are Gmail: Google Workspace uses custom domains. */
+static const Provider *Prov(const char *email)
+{
+    const char *d = strrchr(email, '@');
+    size_t i;
+    if (d) {
+        d++;
+        for (i = 0; i < sizeof g_prov / sizeof g_prov[0]; i++) {
+            const char *m = g_prov[i].dom;
+            size_t n = strlen(m);
+            if (n > 2 && m[n - 1] == '*' ? _strnicmp(d, m, n - 1) == 0 : _stricmp(d, m) == 0) return &g_prov[i];
+        }
+    }
+    return &g_prov[0];
+}
+
+/* Web inbox of an account */
+static void InboxUrl(const char *email, wchar_t *out)
+{
+    const Provider *pv = Prov(email);
+    if (pv->kind == 0) swprintf_s(out, 512, L"https://mail.google.com/mail/?authuser=%hs#inbox", email);
+    else swprintf_s(out, 512, L"%hs", pv->web);
+}
+
+/* Microsoft sign-in. Register a free app at entra.microsoft.com: "Personal Microsoft accounts only",
+   platform "Mobile and desktop", "Allow public client flows" = Yes. The client ID is not a secret. */
+#ifndef MS_CLIENT_ID
+#define MS_CLIENT_ID ""
+#endif
+#define MS_SCOPE "https://outlook.office.com/IMAP.AccessAsUser.All offline_access"
+
+/* POST a form to login.microsoftonline.com. Returns the reply length, -1 on network error. */
+static int HttpPost(const wchar_t *path, const char *body, char *out, int cap)
+{
+    HINTERNET s, c = NULL, r = NULL;
+    DWORD got = 0;
+    int len = -1;
+    s = WinHttpOpen(L"grimnotif", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!s) return -1;
+    WinHttpSetTimeouts(s, 15000, 15000, 15000, 30000);
+    c = WinHttpConnect(s, L"login.microsoftonline.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
+    if (c) r = WinHttpOpenRequest(c, L"POST", path, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (r && WinHttpSendRequest(r, L"Content-Type: application/x-www-form-urlencoded\r\n", (DWORD)-1, (LPVOID)body, (DWORD)strlen(body), (DWORD)strlen(body), 0)
+          && WinHttpReceiveResponse(r, NULL)) {
+        len = 0;
+        while (len < cap - 1 && WinHttpReadData(r, out + len, cap - 1 - len, &got) && got) len += got;
+        out[len] = 0;
+    }
+    if (r) WinHttpCloseHandle(r);
+    if (c) WinHttpCloseHandle(c);
+    WinHttpCloseHandle(s);
+    return len;
+}
+
+/* Appends s form-encoded */
+static void UrlEnc(char *o, size_t cap, const char *s)
+{
+    size_t n = strlen(o);
+    for (; *s && n + 4 < cap; s++) {
+        unsigned char c = (unsigned char)*s;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') o[n++] = (char)c;
+        else n += sprintf_s(o + n, cap - n, "%%%02X", c);
+    }
+    o[n] = 0;
+}
+
+/* String value of "key" in a flat JSON object (enough for OAuth replies) */
+static int JStr(const char *j, const char *key, char *out, size_t cap)
+{
+    char pat[64];
+    const char *p;
+    size_t n = 0;
+    out[0] = 0;
+    sprintf_s(pat, sizeof pat, "\"%s\"", key);
+    if (!(p = strstr(j, pat))) return 0;
+    p += strlen(pat);
+    while (*p == ' ' || *p == ':') p++;
+    if (*p != '"') {                    /* number */
+        while (*p >= '0' && *p <= '9' && n < cap - 1) out[n++] = *p++;
+        out[n] = 0;
+        return n > 0;
+    }
+    for (p++; *p && *p != '"' && n < cap - 1; p++) {
+        if (*p == '\\' && p[1]) p++;
+        out[n++] = *p;
+    }
+    out[n] = 0;
+    return n > 0;
+}
+
+/* Swaps the stored refresh token for an access token. keep: store the rotated refresh token.
+   1 = ok, 0 = sign-in no longer valid, -1 = network. */
+static int MsToken(Account *a, int keep, char *tok, size_t cap)
+{
+    static char body[PASSMAX * 3 + 512];
+    char rt[PASSMAX], *resp = malloc(32768);
+    int n, r = -1;
+    static SRWLOCK lk = SRWLOCK_INIT;   /* body is static: one refresh at a time */
+    tok[0] = 0;
+    if (!resp) return -1;
+    AcquireSRWLockExclusive(&lk);
+    PassOpen(a->pass, rt);
+    strcpy_s(body, sizeof body, "client_id=" MS_CLIENT_ID "&grant_type=refresh_token&scope=");
+    UrlEnc(body, sizeof body, MS_SCOPE);
+    strcat_s(body, sizeof body, "&refresh_token=");
+    UrlEnc(body, sizeof body, rt);
+    n = HttpPost(L"/consumers/oauth2/v2.0/token", body, resp, 32768);
+    SecureZeroMemory(body, sizeof body);
+    ReleaseSRWLockExclusive(&lk);
+    if (n > 0) {
+        if (JStr(resp, "access_token", tok, cap)) {
+            r = 1;
+            if (keep && JStr(resp, "refresh_token", rt, sizeof rt) && strlen(rt) < PASSMAX - 1) {
+                char sealed[PASSMAX];
+                memset(sealed, 0, sizeof sealed);
+                strcpy_s(sealed, sizeof sealed, rt);
+                PassSeal(sealed);
+                AcquireSRWLockExclusive(&g_passLock);
+                memcpy(a->pass, sealed, PASSMAX);
+                ReleaseSRWLockExclusive(&g_passLock);
+                PostMessageW(g_main, WM_SAVECFG, 0, 0);
+            }
+        } else if (strstr(resp, "invalid_grant") || strstr(resp, "unauthorized_client") || strstr(resp, "invalid_client")) r = 0;
+    }
+    SecureZeroMemory(rt, sizeof rt);
+    SecureZeroMemory(resp, 32768);
+    free(resp);
+    return r;
+}
+
+/* base64("user=<email>^Aauth=Bearer <token>^A^A"), the XOAUTH2 initial response */
+static int XoauthB64(const char *email, const char *tok, char *out, DWORD cap)
+{
+    static char raw[PASSMAX + 600];
+    int n = sprintf_s(raw, sizeof raw, "user=%s\001auth=Bearer %s\001\001", email, tok);
+    int ok = n > 0 && CryptBinaryToStringA((const BYTE *)raw, (DWORD)n, CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, out, &cap);
+    SecureZeroMemory(raw, sizeof raw);
+    return ok;
+}
+
+/* Device-code sign-in from the Add dialog. Stores the refresh token sealed in a->pass. */
+static int MsSignIn(HWND d, Account *a)
+{
+    char body[1024], *resp = malloc(32768), code[32], dev[2048], uri[256], rt[PASSMAX];
+    wchar_t msg[512];
+    int ok = 0;
+    if (!resp) return 0;
+    if (!MS_CLIENT_ID[0]) {
+        MessageBoxW(d, L"This build has no Microsoft app ID, so Outlook/Hotmail sign-in is off.\n\nSee the README to set MS_CLIENT_ID.", L"grimnotif", MB_ICONWARNING);
+        free(resp);
+        return 0;
+    }
+    strcpy_s(body, sizeof body, "client_id=" MS_CLIENT_ID "&scope=");
+    UrlEnc(body, sizeof body, MS_SCOPE);
+    if (HttpPost(L"/consumers/oauth2/v2.0/devicecode", body, resp, 32768) <= 0 ||
+        !JStr(resp, "user_code", code, sizeof code) || !JStr(resp, "device_code", dev, sizeof dev) || !JStr(resp, "verification_uri", uri, sizeof uri)) {
+        MessageBoxW(d, L"Could not reach Microsoft sign-in. Check the connection and try again.", L"grimnotif", MB_ICONWARNING);
+        free(resp);
+        return 0;
+    }
+    if (OpenClipboard(d)) {             /* code on the clipboard: paste it on the page */
+        HGLOBAL g = GlobalAlloc(GMEM_MOVEABLE, sizeof code);
+        EmptyClipboard();
+        if (g) { memcpy(GlobalLock(g), code, sizeof code); GlobalUnlock(g); if (!SetClipboardData(CF_TEXT, g)) GlobalFree(g); }
+        CloseClipboard();
+    }
+    {
+        wchar_t wuri[256];
+        MultiByteToWideChar(CP_UTF8, 0, uri, -1, wuri, 256);
+        if (wcsncmp(wuri, L"https://", 8) == 0) ShellExecuteW(d, L"open", wuri, NULL, NULL, SW_SHOWNORMAL);
+    }
+    swprintf_s(msg, 512, L"Code %hs is copied.\n\nPaste it on the Microsoft page that just opened, sign in as %hs and allow access.\n\nThen click OK.", code, a->email);
+    while (MessageBoxW(d, msg, L"Sign in to Outlook", MB_OKCANCEL | MB_ICONINFORMATION) == IDOK) {
+        strcpy_s(body, sizeof body, "client_id=" MS_CLIENT_ID "&grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&device_code=");
+        UrlEnc(body, sizeof body, dev);
+        if (HttpPost(L"/consumers/oauth2/v2.0/token", body, resp, 32768) > 0 && JStr(resp, "refresh_token", rt, sizeof rt) && strlen(rt) < PASSMAX - 1) {
+            memset(a->pass, 0, PASSMAX);
+            strcpy_s(a->pass, PASSMAX, rt);
+            PassSeal(a->pass);
+            ok = 1;
+            break;
+        }
+        if (!strstr(resp, "authorization_pending")) {
+            MessageBoxW(d, L"Sign-in was declined or expired. Click Add to try again.", L"grimnotif", MB_ICONWARNING);
+            break;
+        }
+        swprintf_s(msg, 512, L"Not finished yet. Enter code %hs on the Microsoft page, sign in, then click OK.", code);
+    }
+    SecureZeroMemory(rt, sizeof rt);
+    SecureZeroMemory(resp, 32768);
+    free(resp);
+    return ok;
+}
+
 /* Writes config.ini (via a temp file, so a failed write never loses the old one). */
 static int SaveConfig(void)
 {
     wchar_t tmp[MAX_PATH + 8];
-    char u8[2048], hex[1024];
+    char u8[2048];
+    static char hex[PASSMAX * 2 + 1024];
     FILE *f;
     int i, ok = 1;
 
@@ -185,7 +417,7 @@ static int SaveConfig(void)
     fputs("; grimnotif settings. Edit accounts with Settings in the tray menu;\r\n"
           "; passwords are encrypted and only work for this Windows user.\r\n", f);
     for (i = 0; i < g_nacc; i++) {
-        char plain[128];
+        char plain[PASSMAX];
         PassOpen(g_acc[i].pass, plain);
         ok = Protect(plain, hex, sizeof hex);
         SecureZeroMemory(plain, sizeof plain);
@@ -213,7 +445,8 @@ static int AnyEnabled(void)
 static int LoadConfig(void)
 {
     wchar_t appdata[MAX_PATH];
-    char line[2048], oldEmail[256] = "", oldPass[128] = "";
+    static char line[PASSMAX * 2 + 4096];
+    char oldEmail[256] = "", oldPass[128] = "";
     int dropUrl = 0;
     FILE *f;
 
@@ -1461,7 +1694,8 @@ static int FetchNew(Tls *t)
     unsigned long maxUid = t->acc->uidnext - 1, muted[256];
     size_t tl;
 
-    if (g_muteCat) {                    /* Gmail's tabs are not IMAP labels; its own search finds them */
+    int gm = Prov(t->acc->email)->kind == 0;
+    if (g_muteCat && gm) {              /* Gmail's tabs are not IMAP labels; its own search finds them */
         sprintf_s(cmd, sizeof cmd, "UID SEARCH UID %lu:* X-GM-RAW \"category:promotions OR category:social\"", t->acc->uidnext);
         if (!Cmd(t, cmd, tag)) return 0;
         tl = strlen(tag);
@@ -1479,7 +1713,7 @@ static int FetchNew(Tls *t)
         }
     }
 
-    sprintf_s(cmd, sizeof cmd, "UID FETCH %lu:* (UID FLAGS X-GM-THRID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT CONTENT-TYPE CONTENT-TRANSFER-ENCODING)])", t->acc->uidnext);
+    sprintf_s(cmd, sizeof cmd, "UID FETCH %lu:* (UID FLAGS%s BODY.PEEK[HEADER.FIELDS (FROM SUBJECT CONTENT-TYPE CONTENT-TRANSFER-ENCODING)])", t->acc->uidnext, gm ? " X-GM-THRID" : "");
     if (!Cmd(t, cmd, tag)) return 0;
     tl = strlen(tag);
     for (;;) {
@@ -1519,7 +1753,7 @@ static int FetchNew(Tls *t)
             HeaderField(hdr, "Subject", best->subj, 256);
             NameOnly(best->from);
             if (thr) swprintf_s(best->url, 512, L"https://mail.google.com/mail/?authuser=%hs#all/%llx", t->acc->email, thr);
-            else swprintf_s(best->url, 512, L"https://mail.google.com/mail/?authuser=%hs#inbox", t->acc->email);
+            else InboxUrl(t->acc->email, best->url);
         }
     }
     t->acc->uidnext = maxUid + 1;
@@ -1599,21 +1833,53 @@ static int Unseen(Tls *t)
     return 1;
 }
 
+/* LOGIN with the app password, or XOAUTH2 for Microsoft. keep: store a rotated refresh token.
+   1 = in, 0 = refused, -1 = connection error. */
+static int Login(Tls *t, int keep)
+{
+    char line[2048], tag[16];
+    int r;
+    if (Prov(t->acc->email)->kind != 2) {
+        char cmd[512];
+        LoginCmd(t->acc, cmd, sizeof cmd);
+        r = Cmd(t, cmd, tag);
+        SecureZeroMemory(cmd, sizeof cmd);
+        return r ? WaitOk(t, tag, NULL) : -1;
+    } else {
+        static char tok[PASSMAX], b64[PASSMAX * 2];   /* only ImapSession threads and one action thread at a time */
+        static SRWLOCK lk = SRWLOCK_INIT;
+        size_t tl;
+        AcquireSRWLockExclusive(&lk);
+        r = MsToken(t->acc, keep, tok, sizeof tok);
+        if (r == 1) r = XoauthB64(t->acc->email, tok, b64, sizeof b64) ? 1 : -1;
+        SecureZeroMemory(tok, sizeof tok);
+        if (r == 1) {
+            if (!Cmd(t, "AUTHENTICATE XOAUTH2", tag) || ReadLine(t, line, sizeof line) < 0 || line[0] != '+') r = -1;
+            else r = TlsSend(t, b64, (int)strlen(b64)) && TlsSend(t, "\r\n", 2) ? 1 : -1;
+        }
+        SecureZeroMemory(b64, sizeof b64);
+        ReleaseSRWLockExclusive(&lk);
+        if (r != 1) return r;
+        tl = strlen(tag);
+        for (;;) {
+            if (ReadLine(t, line, sizeof line) < 0) return -1;
+            if (line[0] == '+') { if (!TlsSend(t, "\r\n", 2)) return -1; continue; }   /* error details: answer empty, then NO follows */
+            if (strncmp(line, tag, tl) == 0 && line[tl] == ' ') return strncmp(line + tl + 1, "OK", 2) == 0;
+        }
+    }
+}
+
 /* One connection: login, select, then IDLE until something breaks. -1 = login refused, 0 = never got going, 1 = was connected. */
 static int ImapSession(Tls *t)
 {
-    char line[2048], cmd[512], tag[16];
+    char line[2048], tag[16];
     unsigned long uidnext = 0;
     int r;
 
     t->waitMs = 30000;
-    if (!TlsConnect(t, "imap.gmail.com", "993")) return 0;
+    if (!TlsConnect(t, Prov(t->acc->email)->host, "993")) return 0;
     if (ReadLine(t, line, sizeof line) < 0 || strncmp(line, "* OK", 4) != 0) return 0;
-    LoginCmd(t->acc, cmd, sizeof cmd);
-    r = Cmd(t, cmd, tag);
-    SecureZeroMemory(cmd, sizeof cmd);
-    if (!r) return 0;
-    r = WaitOk(t, tag, NULL);
+    r = Login(t, 1);
     if (r == 0) return -1;
     if (r < 0) return 0;
     if (!Cmd(t, "SELECT INBOX", tag) || WaitOk(t, tag, &uidnext) != 1 || !uidnext) return 0;
@@ -1748,7 +2014,17 @@ static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
     (void)l;
     if (m == WM_INITDIALOG) return TRUE;
     if (m == WM_COMMAND && LOWORD(w) == 2003) {
-        ShellExecuteW(d, L"open", L"https://myaccount.google.com/apppasswords", NULL, NULL, SW_SHOWNORMAL);
+        wchar_t we[256], wu[256];
+        char e8[256];
+        const Provider *pv;
+        GetDlgItemTextW(d, IDC_EMAIL, we, 256);
+        WideCharToMultiByte(CP_UTF8, 0, we, -1, e8, sizeof e8, NULL, NULL);
+        pv = Prov(e8);
+        if (pv->kind == 2) MessageBoxW(d, L"Outlook and Hotmail need no app password: leave it empty and click Add to sign in with Microsoft.", L"grimnotif", MB_ICONINFORMATION);
+        else {
+            MultiByteToWideChar(CP_UTF8, 0, pv->help, -1, wu, 256);
+            ShellExecuteW(d, L"open", wu, NULL, NULL, SW_SHOWNORMAL);
+        }
         return TRUE;
     }
     if (m == WM_COMMAND && LOWORD(w) == IDOK) {
@@ -1765,8 +2041,8 @@ static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
         SecureZeroMemory(wp, sizeof wp);
         PassSeal(a->pass);
         Trim(a->email);
-        if (!strchr(a->email, '@') || o == 0) {
-            MessageBoxW(d, L"Enter the Gmail address and its 16-letter app password.", L"grimnotif", MB_ICONWARNING);
+        if (!strchr(a->email, '@') || (o == 0 && Prov(a->email)->kind != 2)) {
+            MessageBoxW(d, L"Enter the email address and its app password.", L"grimnotif", MB_ICONWARNING);
             return TRUE;
         }
         for (k = 0; k < g_nedit; k++)
@@ -1774,6 +2050,7 @@ static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
                 MessageBoxW(d, L"That account is already in the list.", L"grimnotif", MB_ICONWARNING);
                 return TRUE;
             }
+        if (Prov(a->email)->kind == 2 && !MsSignIn(d, a)) return TRUE;   /* after the duplicate check: no sign-in for nothing */
         a->enabled = 1;
         a->sock = INVALID_SOCKET;
         EndDialog(d, IDOK);
@@ -2036,13 +2313,27 @@ static DWORD WINAPI ActThread(LPVOID arg)
         t->s = INVALID_SOCKET;
         t->acc = &a->acc;               /* private copy: leaves the IDLE connection's socket and tags alone */
         t->waitMs = 30000;
-        if (TlsConnect(t, "imap.gmail.com", "993") && ReadLine(t, line, sizeof line) >= 0 && strncmp(line, "* OK", 4) == 0) {
-            LoginCmd(&a->acc, cmd, sizeof cmd);
-            int lg = Cmd(t, cmd, tag);
-            SecureZeroMemory(cmd, sizeof cmd);
-            if (lg && WaitOk(t, tag, NULL) == 1 &&
+        if (TlsConnect(t, Prov(a->acc.email)->host, "993") && ReadLine(t, line, sizeof line) >= 0 && strncmp(line, "* OK", 4) == 0) {
+            if (Login(t, 0) == 1 &&
                 Cmd(t, "SELECT INBOX", tag) && WaitOk(t, tag, NULL) == 1) {
-                sprintf_s(cmd, sizeof cmd, "UID STORE %lu %s", a->uid, store[a->act]);
+                if (a->act == 1 && Prov(a->acc.email)->kind != 0) {   /* no Gmail labels: move to the folder marked \Archive */
+                    char box[256] = "Archive";
+                    size_t tl;
+                    if (Cmd(t, "LIST (SPECIAL-USE) \"\" \"*\"", tag)) {
+                        tl = strlen(tag);
+                        while (ReadLine(t, line, sizeof line) >= 0 && !(strncmp(line, tag, tl) == 0 && line[tl] == ' ')) {
+                            char *q;
+                            if (!strstr(line, "\\Archive")) continue;
+                            q = line + strlen(line);
+                            while (q > line && (q[-1] == '"' || q[-1] == ' ')) *--q = 0;
+                            while (q > line && q[-1] != ' ' && q[-1] != '"') q--;
+                            if (*q) strcpy_s(box, sizeof box, q);
+                        }
+                    }
+                    strcpy_s(cmd, sizeof cmd, "UID MOVE ");
+                    sprintf_s(cmd + strlen(cmd), sizeof cmd - strlen(cmd), "%lu ", a->uid);
+                    QuoteTo(cmd, sizeof cmd, box);
+                } else sprintf_s(cmd, sizeof cmd, "UID STORE %lu %s", a->uid, store[a->act]);
                 ok = Cmd(t, cmd, tag) && WaitOk(t, tag, NULL) == 1;
                 if (Cmd(t, "LOGOUT", tag)) WaitOk(t, tag, NULL);
             }
@@ -2382,7 +2673,7 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
             if (nm) {
                 wcscpy_s(nm->from, 256, L"While quiet hours");
                 swprintf_s(nm->subj, 256, g_held == 1 ? L"1 new mail" : L"%d new mails", g_held);
-                swprintf_s(nm->url, 512, L"https://mail.google.com/mail/?authuser=%hs#inbox", g_heldAcc);
+                InboxUrl(g_heldAcc, nm->url);
                 nm->uid = NOMAIL;
                 g_held = 0;
                 PostMessageW(h, WM_NEWMAIL, 0, (LPARAM)nm);
@@ -2417,13 +2708,16 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_NEXTMAIL:
         if (g_qn && !IsWindowVisible(g_popup)) ShowNext();
         return 0;
+    case WM_SAVECFG:
+        SaveConfig();
+        return 0;
     case WM_TRAY:
         if (l == WM_LBUTTONUP) {        /* inbox of the account with the most unread; Settings is in the right-click menu */
             wchar_t url[512] = L"https://mail.google.com/mail/#inbox";
             int i, best = -1;
             for (i = 0; i < g_nacc; i++)
                 if (g_acc[i].enabled && (best < 0 || g_acc[i].unread > g_acc[best].unread)) best = i;
-            if (best >= 0) swprintf_s(url, 512, L"https://mail.google.com/mail/?authuser=%hs#inbox", g_acc[best].email);
+            if (best >= 0) InboxUrl(g_acc[best].email, url);
             ShellExecuteW(NULL, L"open", url, NULL, NULL, SW_SHOWNORMAL);
         }
         if (l == WM_RBUTTONUP || l == WM_CONTEXTMENU) {

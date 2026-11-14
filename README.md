@@ -1,6 +1,6 @@
 # grimnotif
 
-Tiny Windows tray app that pops up new Gmail instantly. One ~260 KB exe, ~5 MB RAM, no install, no browser tab needed.
+Tiny Windows tray app that pops up new mail instantly: Gmail, Outlook/Hotmail, Yahoo, AOL, iCloud, GMX, Web.de, Yandex, Fastmail, Zoho. One ~260 KB exe, ~5 MB RAM, no install, no browser tab needed.
 
 <!-- add screenshot.gif of the popup here -->
 
@@ -11,20 +11,29 @@ Tiny Windows tray app that pops up new Gmail instantly. One ~260 KB exe, ~5 MB R
 - Keys while hovering: `E` archive, `S` star, `Z` snooze (`1`–`4` pick time), `Esc` close
 - Tray badge with unread count, "Recent" history menu
 - Do-not-disturb: holds popups during fullscreen apps and quiet hours, then shows a summary
-- Sender filters: VIP list, mute list, hide Promotions/Social
+- Sender filters: VIP list, mute list, hide Promotions/Social (Gmail)
 - Mail stays unread until you open it
 
 ## Setup
 
-1. Turn on 2-Step Verification for your Google account.
-2. Create an app password: https://myaccount.google.com/apppasswords (name it "grimnotif").
-3. Download `grimnotif.exe` from [Releases](../../releases), run it, click **Add...**, enter your Gmail address and the 16-letter app password.
+1. Download `grimnotif.exe` from [Releases](../../releases) and run it.
+2. Click **Add...** and enter your email address.
+   - **Gmail, Yahoo, AOL, iCloud, Yandex, Fastmail, Zoho:** create an app password (the **Get app password...** button opens the right page; 2-step verification must be on) and paste it.
+   - **Outlook, Hotmail, Live:** leave the password empty and click **Add**; sign in on the Microsoft page that opens.
+   - **GMX, Web.de:** turn on IMAP in the webmail settings, then use your normal password (or an app password if 2-step is on).
+   - Zoho's free plan has no IMAP; paid plans work.
+
+Other domains are treated as Google Workspace (Gmail).
 
 To start with Windows: put a shortcut to `grimnotif.exe` in `shell:startup`.
 
 ## Security
 
-App passwords are encrypted with Windows DPAPI and only talk to `imap.gmail.com` over TLS. Details and how to verify downloads: [SECURITY.md](SECURITY.md).
+Passwords and tokens are encrypted with Windows DPAPI; grimnotif only talks to your mail provider over TLS. Details and how to verify downloads: [SECURITY.md](SECURITY.md).
+
+## Outlook sign-in (for builders)
+
+Outlook needs a Microsoft app ID. Register a free app at https://entra.microsoft.com: *App registrations* → *New*, account type **Personal Microsoft accounts only**, platform **Mobile and desktop applications**, then *Authentication* → **Allow public client flows: Yes**. Put the Application (client) ID in `MS_CLIENT_ID` in `grimnotif.c`. It is not a secret.
 
 ## Build
 

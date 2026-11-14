@@ -47,6 +47,30 @@ int main(void)
         LoginCmd(&a, c, sizeof c);
         assert(strcmp(c, "LOGIN \"x@y.com\" \"p\\\"q\\\\r\"") == 0);
     }
+    {   /* providers */
+        assert(Prov("a@Yahoo.CO.uk")->kind == 1 && strcmp(Prov("a@yahoo.co.uk")->host, "imap.mail.yahoo.com") == 0);
+        assert(Prov("a@HOTMAIL.com")->kind == 2 && Prov("a@outlook.de")->kind == 2 && Prov("a@live.com")->kind == 2);
+        assert(strcmp(Prov("a@icloud.com")->host, "imap.mail.me.com") == 0);
+        assert(strcmp(Prov("a@gmx.de")->host, "imap.gmx.net") == 0 && strcmp(Prov("a@gmx.com")->host, "imap.gmx.com") == 0);
+        assert(Prov("a@mycompany.com")->kind == 0 && Prov("nodomain")->kind == 0);   /* Workspace */
+        assert(!Prov("a@notyahoo.com")->kind);
+    }
+    {   /* XOAUTH2 initial response: base64("user=u@x.com^Aauth=Bearer T^A^A") */
+        char b[256], j[64];
+        assert(XoauthB64("u@x.com", "T", b, sizeof b));
+        assert(strcmp(b, "dXNlcj11QHguY29tAWF1dGg9QmVhcmVyIFQBAQ==") == 0);
+        assert(JStr("{\"a\": \"x\\/y\", \"expires_in\":3599}", "a", j, sizeof j) && strcmp(j, "x/y") == 0);
+        assert(JStr("{\"expires_in\":3599}", "expires_in", j, sizeof j) && strcmp(j, "3599") == 0);
+        j[0] = 0; UrlEnc(j, sizeof j, "a b:/");
+        assert(strcmp(j, "a%20b%3A%2F") == 0);
+    }
+    {   /* seal round trip at full size */
+        static char big[PASSMAX], back[PASSMAX];
+        memset(big, 'k', PASSMAX - 2);
+        PassSeal(big);
+        PassOpen(big, back);
+        assert(strlen(back) == PASSMAX - 2 && back[0] == 'k');
+    }
     printf("parsing ok\n");
 
     /* live: TLS to Gmail, then a login that must be refused */
@@ -70,6 +94,24 @@ int main(void)
     TlsClose(t);
     printf("session result %d (expect -1 = TLS ok, login refused)\n", r);
     assert(r == -1);
+    {   /* every provider host: TLS handshake + cert check pass, bogus login refused */
+        static const char *mails[] = {"x@yahoo.com", "x@aol.com", "x@icloud.com", "x@zoho.com", "x@gmx.com", "x@gmx.net",
+                                      "x@web.de", "x@yandex.com", "x@fastmail.com", "x@outlook.com"};
+        int k;
+        for (k = 0; k < (int)(sizeof mails / sizeof mails[0]); k++) {
+            memset(t, 0, sizeof *t);
+            t->s = INVALID_SOCKET;
+            t->acc = &g_acc[0];
+            t->acc->sock = INVALID_SOCKET;
+            strcpy_s(t->acc->email, sizeof t->acc->email, mails[k]);
+            memset(t->acc->pass, 0, PASSMAX);
+            strcpy_s(t->acc->pass, PASSMAX, "aaaabbbbccccdddd");
+            PassSeal(t->acc->pass);
+            r = ImapSession(t);
+            TlsClose(t);
+            printf("%-16s %-24s %d\n", mails[k], Prov(mails[k])->host, r);
+        }
+    }
     printf("all ok\n");
     return 0;
 }

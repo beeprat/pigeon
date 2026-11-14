@@ -41,12 +41,12 @@ END
 
 102 DIALOGEX 0, 0, 220, 92
 STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Add Gmail account"
+CAPTION "Add mail account"
 FONT 9, "Segoe UI", 400, 0, 1
 BEGIN
-    LTEXT           "Gmail address:", -1, 8, 8, 200, 10
+    LTEXT           "Email address:", -1, 8, 8, 200, 10
     EDITTEXT        2001, 8, 19, 204, 13, ES_AUTOHSCROLL
-    LTEXT           "App password (myaccount.google.com/apppasswords):", -1, 8, 38, 204, 10
+    LTEXT           "App password (leave empty for Outlook/Hotmail):", -1, 8, 38, 204, 10
     EDITTEXT        2002, 8, 49, 204, 13, ES_AUTOHSCROLL | ES_PASSWORD
     PUSHBUTTON      "Get app password...", 2003, 8, 70, 80, 14
     DEFPUSHBUTTON   "Add", IDOK, 108, 70, 50, 14
