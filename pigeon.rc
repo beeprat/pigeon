@@ -31,9 +31,11 @@ BEGIN
     AUTOCHECKBOX    "Start with Windows", 1010, 140, 192, 120, 12
     AUTOCHECKBOX    "Hold popups during fullscreen apps", 1011, 14, 209, 220, 12
     AUTOCHECKBOX    "Quiet hours from", 1012, 14, 226, 78, 12
-    COMBOBOX        1013, 96, 224, 50, 150, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "", 1040, "msctls_updown32", 0, 96, 225, 9, 13
+    EDITTEXT        1013, 106, 225, 40, 13, ES_READONLY | ES_CENTER
     LTEXT           "to", -1, 152, 227, 10, 10
-    COMBOBOX        1014, 166, 224, 50, 150, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "", 1041, "msctls_updown32", 0, 164, 225, 9, 13
+    EDITTEXT        1014, 174, 225, 40, 13, ES_READONLY | ES_CENTER
 
     LTEXT           "FILTERS", 4102, 10, 250, 120, 9
     LTEXT           "", 4002, 4, 261, 264, 60, NOT WS_VISIBLE

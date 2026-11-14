@@ -2180,6 +2180,8 @@ static const wchar_t *TestTo(const Account *a)
 #define IDC_QUIET 1012
 #define IDC_QFROM 1013
 #define IDC_QTO 1014
+#define IDC_QFROMSPIN 1040       /* up-down arrows left of the quiet-hours times */
+#define IDC_QTOSPIN 1041
 #define IDC_VIP 1015
 #define IDC_MUTE 1016
 #define IDC_MUTECAT 1017
@@ -2583,6 +2585,12 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
         return g_bgBrush != NULL;
     case WM_CTLCOLORSTATIC: {
         int card = OnCard(d, (HWND)l), id = GetDlgCtrlID((HWND)l);
+        if (id == IDC_QFROM || id == IDC_QTO) {   /* read-only time boxes: same field look as the edits */
+            SetTextColor((HDC)w, Gr(255));
+            SetBkColor((HDC)w, FIELD);
+            *ret = (INT_PTR)g_fieldBrush;
+            return g_fieldBrush != NULL;
+        }
         SetTextColor((HDC)w, id >= 4100 && id < 4200 ? Gr(150) : INK);   /* 4100-4199: section titles */
         SetBkColor((HDC)w, card ? CARD : BG);
         *ret = (INT_PTR)(card ? g_cardBrush : g_bgBrush);
@@ -2815,6 +2823,33 @@ static int AddAccount(HWND owner)
 }
 
 /* Settings take effect as they change; Close saves them to disk. */
+/* Quiet-hours time box: holds minutes after midnight, shows them in the Windows clock format */
+static void QSet(HWND e, int t)
+{
+    SYSTEMTIME st = {0};
+    wchar_t s[32];
+    t = (t % 1440 + 1440) % 1440;
+    SetWindowLongPtrW(e, GWLP_USERDATA, t);
+    st.wHour = (WORD)(t / 60); st.wMinute = (WORD)(t % 60);
+    GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, s, 32);
+    SetWindowTextW(e, s);               /* EN_CHANGE -> ApplySettings */
+}
+
+/* one 15-minute step up (dir 1) or down (-1); off-grid times snap to the grid */
+static void QStep(HWND e, int dir)
+{
+    int t = (int)GetWindowLongPtrW(e, GWLP_USERDATA);
+    QSet(e, dir > 0 ? (t / 15 + 1) * 15 : ((t + 14) / 15 - 1) * 15);
+}
+
+/* time box: mouse wheel and Up/Down keys step it */
+static LRESULT CALLBACK QProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR ref)
+{
+    if (m == WM_MOUSEWHEEL) { QStep(h, GET_WHEEL_DELTA_WPARAM(w) > 0 ? 1 : -1); return 0; }
+    if (m == WM_KEYDOWN && (w == VK_UP || w == VK_DOWN)) { QStep(h, w == VK_UP ? 1 : -1); return 0; }
+    return DefSubclassProc(h, m, w, l);
+}
+
 static void ApplySettings(HWND d)
 {
     int secs = (int)GetDlgItemInt(d, IDC_POPUP, NULL, FALSE), c;
@@ -2825,8 +2860,8 @@ static void ApplySettings(HWND d)
     GetDlgItemTextW(d, IDC_SOUNDFILE, g_soundFile, MAX_PATH);
     g_fullHold = IsDlgButtonChecked(d, IDC_FULLHOLD) == BST_CHECKED;
     g_quiet = IsDlgButtonChecked(d, IDC_QUIET) == BST_CHECKED;
-    g_quietFrom = (int)SendDlgItemMessageW(d, IDC_QFROM, CB_GETITEMDATA, SendDlgItemMessageW(d, IDC_QFROM, CB_GETCURSEL, 0, 0), 0);
-    g_quietTo = (int)SendDlgItemMessageW(d, IDC_QTO, CB_GETITEMDATA, SendDlgItemMessageW(d, IDC_QTO, CB_GETCURSEL, 0, 0), 0);
+    g_quietFrom = (int)GetWindowLongPtrW(GetDlgItem(d, IDC_QFROM), GWLP_USERDATA);   /* minutes, kept by QSet */
+    g_quietTo = (int)GetWindowLongPtrW(GetDlgItem(d, IDC_QTO), GWLP_USERDATA);
     GetDlgItemTextW(d, IDC_VIP, w, 512);
     WideCharToMultiByte(CP_UTF8, 0, w, -1, g_vip, sizeof g_vip, NULL, NULL);
     GetDlgItemTextW(d, IDC_MUTE, w, 512);
@@ -2847,6 +2882,10 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
     case WM_NOTIFY: {
         NMLISTVIEW *nm = (NMLISTVIEW *)l;
         int i;
+        if (!init && nm->hdr.code == UDN_DELTAPOS && (nm->hdr.idFrom == IDC_QFROMSPIN || nm->hdr.idFrom == IDC_QTOSPIN)) {
+            QStep(GetDlgItem(d, nm->hdr.idFrom == IDC_QFROMSPIN ? IDC_QFROM : IDC_QTO), ((NMUPDOWN *)l)->iDelta < 0 ? 1 : -1);   /* up arrow: iDelta -1 */
+            return TRUE;
+        }
         if (init || nm->hdr.idFrom != IDC_LIST) break;
         if (nm->hdr.code == NM_DBLCLK) { SendMessageW(d, WM_COMMAND, IDC_FIX, 0); return TRUE; }
         if (nm->hdr.code == LVN_COLUMNCLICK) { SortList(lv, nm->iSubItem); return TRUE; }
@@ -2977,30 +3016,10 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         SetDlgItemTextW(d, IDC_SOUNDFILE, g_soundFile);
         CheckDlgButton(d, IDC_FULLHOLD, g_fullHold ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(d, IDC_QUIET, g_quiet ? BST_CHECKED : BST_UNCHECKED);
-        {   /* every 15 minutes in the Windows clock format; a saved off-grid time (from the ini) gets its own entry */
-            int k, t, id;
-            for (k = 0; k < 2; k++) {
-                int want = k ? g_quietTo : g_quietFrom, sel = 0;
-                id = k ? IDC_QTO : IDC_QFROM;
-                for (t = 0; t < 24 * 60; t += 15) {
-                    int n = t;
-                    if (want > t - 15 && want < t) n = want;   /* off-grid: insert before this slot */
-                    for (;;) {
-                        SYSTEMTIME st = {0};
-                        wchar_t s[32];
-                        LRESULT ix;
-                        st.wHour = (WORD)(n / 60); st.wMinute = (WORD)(n % 60);
-                        GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, s, 32);
-                        ix = SendDlgItemMessageW(d, id, CB_ADDSTRING, 0, (LPARAM)s);
-                        SendDlgItemMessageW(d, id, CB_SETITEMDATA, ix, n);
-                        if (n == want) sel = (int)ix;
-                        if (n == t) break;
-                        n = t;
-                    }
-                }
-                SendDlgItemMessageW(d, id, CB_SETCURSEL, sel, 0);
-            }
-        }
+        QSet(GetDlgItem(d, IDC_QFROM), g_quietFrom);
+        QSet(GetDlgItem(d, IDC_QTO), g_quietTo);
+        SetWindowSubclass(GetDlgItem(d, IDC_QFROM), QProc, 1, 0);
+        SetWindowSubclass(GetDlgItem(d, IDC_QTO), QProc, 1, 0);
         {
             wchar_t w[512];
             MultiByteToWideChar(CP_UTF8, 0, g_vip, -1, w, 512);
