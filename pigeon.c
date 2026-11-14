@@ -990,7 +990,7 @@ static void DrawButtons(HWND h, HDC dc)
         SetBkMode(dc, TRANSPARENT);
         of = SelectObject(dc, g_fontIcon);
         if (g_animSnz) {                /* the time label fades into a clock on the way; its hands go round once */
-            double f = p < 0.5 ? p * 2 : 1, s2 = el < 200 ? 0 : (el - 200) / (ANIM_MS - 200);
+            double f = p < 0.5 ? p * 2 : 1, s2 = el < 100 ? 0 : el > 600 ? 1 : (el - 100) / 500;   /* one turn in half a second */
             s2 = s2 < 0.5 ? 2 * s2 * s2 : 1 - 2 * (1 - s2) * (1 - s2);   /* ease in and out */
             DrawClock(dc, cx, cy, DP(7), 6.28318 * s2, Mix(bg, fg, (int)(255 * f)), bg);   /* first: its square is opaque */
             if (f < 1) {
@@ -1000,6 +1000,7 @@ static void DrawButtons(HWND h, HDC dc)
             }
         } else if (b == 1) {            /* archive: an envelope drops into the box */
             wchar_t box = 0xE7B8, env = 0xE715;
+            q = el < 250 ? 0 : el > 850 ? 1 : (el - 250) / 600;   /* starts while still sliding */
             GlyphAt(dc, g_fontIcon, box, cx, cy, fg);
             if (q > 0) {
                 int sv = SaveDC(dc);
@@ -1014,8 +1015,8 @@ static void DrawButtons(HWND h, HDC dc)
             GlyphAt(dc, g_fontIcon, line, cx, cy, fg);
         } else {                        /* read: envelope opens, the letter slides out to the right */
             wchar_t g = 0xE8C3, page = 0xE7C3;
-            double m = (double)el / ANIM_MS;
-            m = m < 0.5 ? 4 * m * m * m : 1 - 4 * (1 - m) * (1 - m) * (1 - m);   /* ease in and out: no lurch */
+            double m = el > 650 ? 1 : el / 650;   /* starts on the click */
+            m = 1 - (1 - m) * (1 - m) * (1 - m);   /* moves at once, settles */
             GlyphAt(dc, g_fontIconS, page, cx + DP(9) * m, cy, Mix(bg, fg, (int)(255 * m)));   /* letter appears right */
             GlyphAt(dc, g_fontIcon, g, cx - DP(8) * m, cy, fg);   /* envelope steps left: pair centered */
         }
