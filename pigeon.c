@@ -979,7 +979,7 @@ static void DrawButtons(HWND h, HDC dc)
         p = el < SLIDE_MS ? el / SLIDE_MS : 1;
         e = 1 - pow(1 - p, 5);          /* quick start, long gentle arrival */
         q = el < SLIDE_MS ? 0 : (el - SLIDE_MS) / (ANIM_MS - SLIDE_MS);   /* after arriving, 0..1 */
-        k = (int)(255 * (1 - p));
+        k = el < 250 ? (int)(255 * (1 - el / 250)) : 0;   /* the others are gone in a quarter second */
         GetClientRect(h, &rc);
         for (i = 0; i < NBTN; i++)
             if (i != b) SmoothRound(dc, BtnRect(h, i), DP(8), Mix(BG, BarFade(Gr(22)), k));
