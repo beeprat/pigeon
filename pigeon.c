@@ -2741,6 +2741,27 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         if (init || nm->hdr.idFrom != IDC_LIST) break;
         if (nm->hdr.code == NM_DBLCLK) { SendMessageW(d, WM_COMMAND, IDC_FIX, 0); return TRUE; }
         if (nm->hdr.code == LVN_COLUMNCLICK) { SortList(lv, nm->iSubItem); return TRUE; }
+        if (nm->hdr.code == LVN_KEYDOWN && ((NMLVKEYDOWN *)l)->wVKey == VK_F2) {   /* ListView has no F2 of its own */
+            if ((i = ListView_GetNextItem(lv, -1, LVNI_SELECTED)) >= 0) ListView_EditLabel(lv, i);
+            return TRUE;
+        }
+        if (nm->hdr.code == NM_RCLICK && ((NMITEMACTIVATE *)l)->iItem >= 0) {   /* right-click menu on an account */
+            HMENU pm = CreatePopupMenu();
+            POINT pt;
+            int row = ((NMITEMACTIVATE *)l)->iItem, cmd;
+            ListView_SetItemState(lv, row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+            AppendMenuW(pm, MF_STRING, 1, L"Set nickname...	F2");
+            AppendMenuW(pm, MF_STRING, 2, L"Fix sign-in");
+            AppendMenuW(pm, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(pm, MF_STRING, 3, L"Remove");
+            GetCursorPos(&pt);
+            cmd = TrackPopupMenu(pm, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, d, NULL);
+            DestroyMenu(pm);
+            if (cmd == 1) { SetFocus(lv); ListView_EditLabel(lv, row); }
+            if (cmd == 2) SendMessageW(d, WM_COMMAND, IDC_FIX, 0);
+            if (cmd == 3) SendMessageW(d, WM_COMMAND, IDC_REMOVE, 0);
+            return TRUE;
+        }
         if (nm->hdr.code == LVN_BEGINLABELEDITW) {   /* rename: edit just the nickname */
             NMLVDISPINFOW *di = (NMLVDISPINFOW *)l;
             HWND ed = ListView_GetEditControl(lv);
