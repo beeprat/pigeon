@@ -902,7 +902,7 @@ static void DrawClock(HDC dc, int cx, int cy, int rad, double ang, COLORREF ink,
     HBRUSH bb = CreateSolidBrush(bgc);
     HPEN pen = CreatePen(PS_SOLID, DP(1) * S + S / 2, ink);
     RECT all = {0, 0, sz * S, sz * S};
-    double ha = ang / 12 + 3.14159 * 5 / 6;   /* hour hand starts near 5 and creeps */
+    double ha = 3.14159 / 2;            /* hour hand stays at 3, like the icon */
     FillRect(m, &all, bb);
     op = SelectObject(m, pen);
     ob = SelectObject(m, GetStockObject(NULL_BRUSH));
@@ -963,29 +963,37 @@ static void DrawButtons(HWND h, HDC dc)
             }
         } else if (b == 1) {            /* archive: an envelope drops into the box */
             wchar_t box = 0xE7B8, env = 0xE715;
-            int y = cy - DP(12) + (int)(DP(14) * q * q);   /* falls, speeding up */
-            RECT er = {r.left, y - DP(8), r.right, y + DP(8)}, br = r;
-            OffsetRect(&br, 0, DP(3));  /* box sits low: room above it for the envelope */
+            int y = cy - DP(16) + (int)(DP(14) * q * q);   /* falls in from above, speeding up */
+            RECT er = {r.left, y - DP(8), r.right, y + DP(8)};
             SetTextColor(dc, fg);
-            DrawTextW(dc, &box, 1, &br, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            DrawTextW(dc, &box, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
             if (q > 0) {
                 int sv = SaveDC(dc);
-                IntersectClipRect(dc, r.left, r.top, r.right, cy - DP(5));   /* gone once past the lid */
+                IntersectClipRect(dc, r.left, r.top, r.right, cy - DP(7));   /* gone once past the lid */
                 SelectObject(dc, g_fontIconS);
                 SetTextColor(dc, Mix(bg, fg, (int)(255 * (q < 0.25 ? q * 4 : 1))));
                 DrawTextW(dc, &env, 1, &er, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
                 RestoreDC(dc, sv);
             }
-        } else if (b == 2) {            /* star: fills in from the click on, hops on arrival */
+        } else if (b == 2) {            /* star: fills in from the click on */
             wchar_t solid = 0xE735, line = 0xE734;
-            OffsetRect(&r, 0, -(int)(DP(4) * sin(3.14159 * q) + 0.5));
             SetTextColor(dc, Mix(bg, fg, (int)(255 * p)));
             DrawTextW(dc, &solid, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
             SetTextColor(dc, fg);
             DrawTextW(dc, &line, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        } else {                        /* read: closed envelope opens and hops */
-            wchar_t g = q > 0 ? 0xE8C3 : 0xE715;
-            OffsetRect(&r, 0, -(int)(DP(4) * sin(3.14159 * q) + 0.5));
+        } else {                        /* read: envelope opens, the letter slides out to the right */
+            wchar_t g = 0xE8C3, page = 0xE7C3;
+            double m = (double)el / ANIM_MS;
+            RECT lr = r;
+            int sv = SaveDC(dc);
+            m = 1 - (1 - m) * (1 - m) * (1 - m);   /* out quickly, settles */
+            OffsetRect(&lr, (int)(DP(20) * m), 0);
+            IntersectClipRect(dc, cx + DP(8), r.top, r.right, r.bottom);   /* only the part out of the envelope */
+            SelectObject(dc, g_fontIconS);
+            SetTextColor(dc, Mix(bg, fg, (int)(255 * (m < 0.8 ? 1 : (1 - m) * 5))));
+            DrawTextW(dc, &page, 1, &lr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            RestoreDC(dc, sv);
+            SelectObject(dc, g_fontIcon);
             SetTextColor(dc, fg);
             DrawTextW(dc, &g, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         }
