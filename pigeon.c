@@ -985,14 +985,12 @@ static void DrawButtons(HWND h, HDC dc)
             wchar_t g = 0xE8C3, page = 0xE7C3;
             double m = (double)el / ANIM_MS;
             RECT lr = r;
-            int sv = SaveDC(dc);
             m = 1 - (1 - m) * (1 - m) * (1 - m);   /* out quickly, settles */
-            OffsetRect(&lr, (int)(DP(20) * m), 0);
-            IntersectClipRect(dc, cx + DP(8), r.top, r.right, r.bottom);   /* only the part out of the envelope */
+            OffsetRect(&r, -(int)(DP(8) * m), 0);   /* envelope steps left, letter appears right: pair centered */
+            OffsetRect(&lr, (int)(DP(9) * m), 0);
             SelectObject(dc, g_fontIconS);
-            SetTextColor(dc, Mix(bg, fg, (int)(255 * (m < 0.8 ? 1 : (1 - m) * 5))));
+            SetTextColor(dc, Mix(bg, fg, (int)(255 * m)));
             DrawTextW(dc, &page, 1, &lr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-            RestoreDC(dc, sv);
             SelectObject(dc, g_fontIcon);
             SetTextColor(dc, fg);
             DrawTextW(dc, &g, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
