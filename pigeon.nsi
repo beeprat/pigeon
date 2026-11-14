@@ -11,7 +11,7 @@ Unicode true
 !define UNINST "Software\Microsoft\Windows\CurrentVersion\Uninstall\pigeon"
 
 Name "pigeon"
-OutFile "pigeon-setup.exe"
+OutFile "pigeon_setup.exe"   ; not pigeon-setup: sorts after pigeon.exe, which pigeon v1.1-v1.2 updaters take the first .exe of
 InstallDir "$LOCALAPPDATA\Programs\pigeon"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma

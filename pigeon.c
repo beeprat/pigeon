@@ -3320,7 +3320,7 @@ static void Update(HWND d)
         MessageBoxW(d, L"pigeon is up to date (" TEXT(PIGEON_VERSION) L").", L"pigeon", MB_ICONINFORMATION);
         return;
     }
-    if (!JsonStr(buf, "browser_download_url", ".exe", exe, sizeof exe) || !JsonStr(buf, "browser_download_url", ".exe.sig", sigUrl, sizeof sigUrl)) {
+    if (!JsonStr(buf, "browser_download_url", "/pigeon.exe", exe, sizeof exe) || !JsonStr(buf, "browser_download_url", "/pigeon.exe.sig", sigUrl, sizeof sigUrl)) {
         free(buf);
         MessageBoxW(d, L"The new release has no download yet. Try again later.", L"pigeon", MB_ICONWARNING);
         return;

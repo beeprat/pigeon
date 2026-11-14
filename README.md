@@ -20,7 +20,7 @@ installer or portable exe, no admin rights either way.
 
 ## setup
 
-1. download `pigeon-setup.exe` from [Releases](../../releases) and run it (Start menu entry, uninstall from Settings > Apps).\
+1. download `pigeon_setup.exe` from [Releases](../../releases) and run it (Start menu entry, uninstall from Settings > Apps).\
    or take `pigeon.exe` and run it from any folder.
 3. click **Add...** and enter your email address.
    - **Gmail, Yahoo, AOL, iCloud, Yandex, Fastmail, Zoho:** create an app password (the **Get app password...** button opens the right page; 2-step verification must be on) and paste it.
