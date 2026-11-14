@@ -74,6 +74,8 @@ static int g_hover;
 static int g_corner;            /* 0 top right, 1 top left, 2 bottom right, 3 bottom left */
 static int g_fullHold = 1;      /* hold popups while a fullscreen app or game runs */
 static int g_quiet, g_quietFrom = 22, g_quietTo = 7;
+static int g_colOrder[3] = {0, 1, 2}, g_colW[3];  /* account list: column order, widths in 96-dpi px (0 = default) */
+static int g_sortCol = -1, g_sortDir = 1;         /* -1: unsorted */
 static char g_vip[512], g_mute[512];   /* sender filters, UTF-8, comma separated parts of "Name <address>" */
 static int g_muteCat;           /* no popups for Gmail's Promotions and Social tabs */   /* quiet hours: no popups, no sound */
 static wchar_t g_mailUrl[512] = L"https://mail.google.com/mail/u/0/#inbox";
@@ -435,6 +437,7 @@ static int SaveConfig(void)
     fprintf(f, "popup=%d\r\nsound=%d\r\ncorner=%d\r\n", g_popupMs / 1000, g_sound, g_corner);
     fprintf(f, "fullhold=%d\r\nquiet=%d\r\nquietfrom=%d\r\nquietto=%d\r\n", g_fullHold, g_quiet, g_quietFrom, g_quietTo);
     fprintf(f, "vip=%s\r\nmute=%s\r\nmutecat=%d\r\n", g_vip, g_mute, g_muteCat);
+    fprintf(f, "cols=%d %d %d %d %d %d %d %d\r\n", g_colOrder[0], g_colOrder[1], g_colOrder[2], g_colW[0], g_colW[1], g_colW[2], g_sortCol, g_sortDir);
     WideCharToMultiByte(CP_UTF8, 0, g_soundFile, -1, u8, sizeof u8, NULL, NULL);
     fprintf(f, "soundfile=%s\r\n", u8);
     if (fclose(f) != 0) ok = 0;
@@ -488,6 +491,19 @@ static int LoadConfig(void)
         else if (strcmp(k, "corner") == 0)   g_corner = atoi(v) & 3;
         else if (strcmp(k, "fullhold") == 0) g_fullHold = atoi(v);
         else if (strcmp(k, "quiet") == 0)    g_quiet = atoi(v);
+        else if (strcmp(k, "cols") == 0) {
+            int o[3], wd[3], sc, sd, j;
+            if (sscanf_s(v, "%d %d %d %d %d %d %d %d", &o[0], &o[1], &o[2], &wd[0], &wd[1], &wd[2], &sc, &sd) == 8
+                && o[0] >= 0 && o[1] >= 0 && o[2] >= 0 && o[0] + o[1] + o[2] == 3
+                && o[0] != o[1] && o[1] != o[2] && o[0] != o[2] && sc >= -1 && sc < 3) {
+                for (j = 0; j < 3; j++) {
+                    g_colOrder[j] = o[j];
+                    g_colW[j] = wd[j] > 0 && wd[j] < 2000 ? wd[j] : 0;
+                }
+                g_sortCol = sc;
+                g_sortDir = sd < 0 ? -1 : 1;
+            }
+        }
         else if (strcmp(k, "quietfrom") == 0) g_quietFrom = atoi(v) % 24;
         else if (strcmp(k, "quietto") == 0)  g_quietTo = atoi(v) % 24;
         else if (strcmp(k, "vip") == 0)      strcpy_s(g_vip, sizeof g_vip, v);
@@ -2561,7 +2577,6 @@ static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
 }
 
 static HWND g_sortLv;
-static int g_sortCol, g_sortDir = 1;
 
 static int CALLBACK SortCmp(LPARAM a, LPARAM b, LPARAM col)
 {
@@ -2674,6 +2689,41 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         c.cx = rc.right * 23 / 100 - GetSystemMetrics(SM_CXVSCROLL);
         ListView_InsertColumn(lv, 2, &c);
         for (i = 0; i < g_nacc; i++) if (!g_acc[i].removed) ListAdd(lv, i);
+        if (g_colW[0] && g_colW[1] && g_colW[2]) for (i = 0; i < 3; i++) ListView_SetColumnWidth(lv, i, DP(g_colW[i]));
+        ListView_SetColumnOrderArray(lv, 3, g_colOrder);
+        if (g_sortCol >= 0) { g_sortDir = -g_sortDir; SortList(lv, g_sortCol); }   /* SortList flips it back */
+        {   /* checkboxes in the theme: grey outline off, white with a black tick on */
+            int sz = DP(16), k;
+            HIMAGELIST il = ImageList_Create(sz, sz, ILC_COLOR24, 2, 0);
+            HDC sdc = GetDC(NULL), mdc = CreateCompatibleDC(sdc);
+            for (k = 0; k < 2; k++) {
+                HBITMAP bm = CreateCompatibleBitmap(sdc, sz, sz);
+                HGDIOBJ ob = SelectObject(mdc, bm);
+                RECT b = {0, 0, sz, sz}, in;
+                FillRect(mdc, &b, g_fieldBrush);
+                InflateRect(&b, -DP(2), -DP(2));
+                SmoothRound(mdc, b, DP(3), k ? RGB(240, 240, 240) : RGB(140, 140, 140));
+                in = b;
+                InflateRect(&in, -DP(1) - 1, -DP(1) - 1);
+                if (!k) SmoothRound(mdc, in, DP(2), FIELD);
+                else {
+                    HPEN pen = CreatePen(PS_SOLID, DP(2), RGB(20, 20, 20));
+                    HGDIOBJ op = SelectObject(mdc, pen);
+                    MoveToEx(mdc, b.left + DP(3), b.top + DP(6), NULL);
+                    LineTo(mdc, b.left + DP(5), b.top + DP(8));
+                    LineTo(mdc, b.right - DP(3), b.top + DP(3));
+                    SelectObject(mdc, op);
+                    DeleteObject(pen);
+                }
+                SelectObject(mdc, ob);
+                ImageList_Add(il, bm, NULL);
+                DeleteObject(bm);
+            }
+            DeleteDC(mdc);
+            ReleaseDC(NULL, sdc);
+            il = ListView_SetImageList(lv, il, LVSIL_STATE);
+            if (il) ImageList_Destroy(il);
+        }
         ListStatus(lv);
         SetDlgItemInt(d, IDC_POPUP, g_popupMs / 1000, FALSE);
         CheckDlgButton(d, IDC_SOUND, g_sound ? BST_CHECKED : BST_UNCHECKED);
@@ -2757,6 +2807,12 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         }
         case IDCANCEL:                  /* Close, Esc and the X: write it all down */
             ApplySettings(d);
+            {   /* remember the account columns as left */
+                HWND lv = GetDlgItem(d, IDC_LIST);
+                int k;
+                ListView_GetColumnOrderArray(lv, 3, g_colOrder);
+                for (k = 0; k < 3; k++) g_colW[k] = MulDiv(ListView_GetColumnWidth(lv, k), 96, g_dpi);
+            }
             AutoStartSet(IsDlgButtonChecked(d, IDC_AUTOSTART) == BST_CHECKED);
             if (!SaveConfig()) MessageBoxW(d, L"Could not save settings.", L"pigeon", MB_ICONERROR);
             EndDialog(d, IDCANCEL);
