@@ -1232,7 +1232,7 @@ static int TextW(HFONT f, const wchar_t *t)
 static void ShowPopup(const wchar_t *from, const wchar_t *subj, const wchar_t *to, const wchar_t *prev)
 {
     RECT wa;
-    int w, t1, t2, t3 = 0, x, y, ph;
+    int w, x, y, ph;
     HRGN rgn;
 
     wcsncpy_s(g_text, 512, from, _TRUNCATE);
@@ -1242,19 +1242,8 @@ static void ShowPopup(const wchar_t *from, const wchar_t *subj, const wchar_t *t
     g_prev[0] = 0;
     if (prev) wcsncpy_s(g_prev, 300, prev, _TRUNCATE);
 
-    t1 = TextW(g_font, g_text);
-    t2 = TextW(g_fontBig, g_subj);
-    if (g_to[0]) t3 = TextW(g_fontSmall, g_to);
-    if (t3 > t2) t2 = t3;
-    if (g_prev[0]) {            /* the preview may widen the popup, but only so far */
-        t3 = TextW(g_fontSmall, g_prev);
-        if (t3 > DP(320)) t3 = DP(320);
-        if (t3 > t2) t2 = t3;
-    }
-    w = DP(PAD + AV + GAP) + (t1 > t2 ? t1 : t2) + DP(PAD);
+    w = DP(380);                /* fixed: same size for every mail; long text gets "..." */
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
-    if (w < DP(160)) w = DP(160);
-    if (w > DP(600)) w = DP(600);   /* very long subjects get "..." */
     if (w > (wa.right - wa.left) / 2) w = (wa.right - wa.left) / 2;
     ph = g_h1 + g_h2 + (g_to[0] ? g_h3 : 0) + (g_prev[0] ? g_h3 : 0);
     if (ph < DP(AV)) ph = DP(AV);
