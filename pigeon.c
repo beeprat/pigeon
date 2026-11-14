@@ -2180,7 +2180,7 @@ static const wchar_t *TestTo(const Account *a)
 #define IDC_QUIET 1012
 #define IDC_QFROM 1013
 #define IDC_QTO 1014
-#define IDC_QFROMSPIN 1040       /* up-down arrows right of the quiet-hours times */
+#define IDC_QFROMSPIN 1040       /* up-down arrows inside the quiet-hours time fields */
 #define IDC_QTOSPIN 1041
 #define IDC_VIP 1015
 #define IDC_MUTE 1016
@@ -2574,6 +2574,12 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
             GetWindowRect(c, &r);
             MapWindowPoints(NULL, d, (POINT *)&r, 2);
             InflateRect(&r, DP(5), DP(3) + (int)(INT_PTR)GetPropW(c, L"pgpad"));
+            if (GetDlgCtrlID(c) == IDC_QFROM || GetDlgCtrlID(c) == IDC_QTO) {   /* field reaches over its arrows */
+                RECT sr;
+                GetWindowRect(GetDlgItem(d, GetDlgCtrlID(c) == IDC_QFROM ? IDC_QFROMSPIN : IDC_QTOSPIN), &sr);
+                MapWindowPoints(NULL, d, (POINT *)&sr, 2);
+                r.right = sr.right + DP(3);
+            }
             SmoothRound(dc, r, DP(8), FIELD);
         }
         EndPaint(d, &ps);
