@@ -1,8 +1,8 @@
-/* libFuzzer harness for grimnotif's mail parsers.
+/* libFuzzer harness for pigeon's mail parsers.
    Build (x64 Native Tools prompt): cl /nologo /utf-8 /DUNICODE /D_UNICODE /fsanitize=fuzzer,address /Zi fuzz.c
    Run: fuzz.exe -max_total_time=600 */
 #define wWinMain grim_wWinMain
-#include "grimnotif.c"
+#include "pigeon.c"
 #undef wWinMain
 
 int LLVMFuzzerTestOneInput(const unsigned char *d, size_t n)

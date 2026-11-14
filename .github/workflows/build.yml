@@ -27,25 +27,25 @@ jobs:
       - name: Build
         shell: cmd
         run: |
-          rc /nologo /fo grimnotif.res grimnotif.rc
-          cl /nologo /MT /O1 /W3 /sdl /guard:cf /D_CRT_SECURE_NO_WARNINGS /DUNICODE /D_UNICODE grimnotif.c grimnotif.res /link /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /CETCOMPAT /guard:cf /OUT:grimnotif.exe
+          rc /nologo /fo pigeon.res pigeon.rc
+          cl /nologo /MT /O1 /W3 /sdl /guard:cf /D_CRT_SECURE_NO_WARNINGS /DUNICODE /D_UNICODE pigeon.c pigeon.res /link /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /CETCOMPAT /guard:cf /OUT:pigeon.exe
       - name: Checksum
         shell: pwsh
-        run: (Get-FileHash grimnotif.exe -Algorithm SHA256).Hash.ToLower() + "  grimnotif.exe" | Out-File -Encoding ascii grimnotif.exe.sha256
+        run: (Get-FileHash pigeon.exe -Algorithm SHA256).Hash.ToLower() + "  pigeon.exe" | Out-File -Encoding ascii pigeon.exe.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: grimnotif
+          name: pigeon
           path: |
-            grimnotif.exe
-            grimnotif.exe.sha256
+            pigeon.exe
+            pigeon.exe.sha256
       - name: Attest
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: grimnotif.exe
+          subject-path: pigeon.exe
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME grimnotif.exe grimnotif.exe.sha256 --generate-notes
+        run: gh release create $env:GITHUB_REF_NAME pigeon.exe pigeon.exe.sha256 --generate-notes

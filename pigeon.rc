@@ -1,13 +1,13 @@
 #include <windows.h>
 #include <commctrl.h>
 
-1 ICON "grimnotif.ico"
-1 24 "grimnotif.manifest"
+1 ICON "pigeon.ico"
+1 24 "pigeon.manifest"
 
 101 DIALOGEX 0, 0, 260, 290
 STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_APPWINDOW
-CAPTION "grimnotif settings"
+CAPTION "pigeon settings"
 FONT 9, "Segoe UI", 400, 0, 1
 BEGIN
     LTEXT           "Gmail accounts (checked = notify):", -1, 8, 8, 200, 10
@@ -56,7 +56,7 @@ END
 103 DIALOGEX 0, 0, 180, 188
 STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_APPWINDOW
-CAPTION "grimnotif test menu"
+CAPTION "pigeon test menu"
 FONT 9, "Segoe UI", 400, 0, 1
 BEGIN
     PUSHBUTTON      "Short popup", 3001, 8, 8, 164, 16

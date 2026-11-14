@@ -1,7 +1,7 @@
-/* grimnotif: Gmail new-mail popup at the top right.
+/* pigeon: Gmail new-mail popup at the top right.
    With email= and password= set it holds an IMAP IDLE connection, so Gmail pushes new mail instantly.
    Otherwise it polls the Apps Script web app at url=.
-   Settings live in %APPDATA%\grimnotif\config.ini, created on first run. Plain Win32, no runtime needed. */
+   Settings live in %APPDATA%\pigeon\config.ini, created on first run. Plain Win32, no runtime needed. */
 #define WIN32_LEAN_AND_MEAN
 #define SECURITY_WIN32
 #include <winsock2.h>
@@ -110,7 +110,7 @@ static int Protect(const char *pass, char *hex, size_t cap)
     DWORD i;
     in.pbData = (BYTE *)pass;
     in.cbData = (DWORD)strlen(pass);
-    if (!CryptProtectData(&in, L"grimnotif", NULL, NULL, NULL, CRYPTPROTECT_UI_FORBIDDEN, &out)) return 0;
+    if (!CryptProtectData(&in, L"pigeon", NULL, NULL, NULL, CRYPTPROTECT_UI_FORBIDDEN, &out)) return 0;
     if ((size_t)out.cbData * 2 + 1 > cap) { LocalFree(out.pbData); return 0; }
     for (i = 0; i < out.cbData; i++) sprintf_s(hex + i * 2, 3, "%02x", out.pbData[i]);
     hex[out.cbData * 2] = 0;
@@ -245,7 +245,7 @@ static int HttpPost(const wchar_t *path, const char *body, char *out, int cap)
     HINTERNET s, c = NULL, r = NULL;
     DWORD got = 0;
     int len = -1;
-    s = WinHttpOpen(L"grimnotif", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    s = WinHttpOpen(L"pigeon", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!s) return -1;
     WinHttpSetTimeouts(s, 15000, 15000, 15000, 30000);
     c = WinHttpConnect(s, L"login.microsoftonline.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
@@ -356,7 +356,7 @@ static int MsSignIn(HWND d, Account *a)
     int ok = 0;
     if (!resp) return 0;
     if (!MS_CLIENT_ID[0]) {
-        MessageBoxW(d, L"This build has no Microsoft app ID, so Outlook/Hotmail sign-in is off.\n\nSee the README to set MS_CLIENT_ID.", L"grimnotif", MB_ICONWARNING);
+        MessageBoxW(d, L"This build has no Microsoft app ID, so Outlook/Hotmail sign-in is off.\n\nSee the README to set MS_CLIENT_ID.", L"pigeon", MB_ICONWARNING);
         free(resp);
         return 0;
     }
@@ -364,7 +364,7 @@ static int MsSignIn(HWND d, Account *a)
     UrlEnc(body, sizeof body, MS_SCOPE);
     if (HttpPost(L"/consumers/oauth2/v2.0/devicecode", body, resp, 32768) <= 0 ||
         !JStr(resp, "user_code", code, sizeof code) || !JStr(resp, "device_code", dev, sizeof dev) || !JStr(resp, "verification_uri", uri, sizeof uri)) {
-        MessageBoxW(d, L"Could not reach Microsoft sign-in. Check the connection and try again.", L"grimnotif", MB_ICONWARNING);
+        MessageBoxW(d, L"Could not reach Microsoft sign-in. Check the connection and try again.", L"pigeon", MB_ICONWARNING);
         free(resp);
         return 0;
     }
@@ -391,7 +391,7 @@ static int MsSignIn(HWND d, Account *a)
             break;
         }
         if (!strstr(resp, "authorization_pending")) {
-            MessageBoxW(d, L"Sign-in was declined or expired. Click Add to try again.", L"grimnotif", MB_ICONWARNING);
+            MessageBoxW(d, L"Sign-in was declined or expired. Click Add to try again.", L"pigeon", MB_ICONWARNING);
             break;
         }
         swprintf_s(msg, 512, L"Not finished yet. Enter code %hs on the Microsoft page, sign in, then click OK.", code);
@@ -414,7 +414,7 @@ static int SaveConfig(void)
     swprintf_s(tmp, MAX_PATH + 8, L"%s.tmp", g_cfgPath);
     f = _wfopen(tmp, L"wb");
     if (!f) return 0;
-    fputs("; grimnotif settings. Edit accounts with Settings in the tray menu;\r\n"
+    fputs("; pigeon settings. Edit accounts with Settings in the tray menu;\r\n"
           "; passwords are encrypted and only work for this Windows user.\r\n", f);
     for (i = 0; i < g_nacc; i++) {
         char plain[PASSMAX];
@@ -441,7 +441,7 @@ static int AnyEnabled(void)
     return 0;
 }
 
-/* Loads %APPDATA%\grimnotif\config.ini. Returns 1 if there is something to watch. */
+/* Loads %APPDATA%\pigeon\config.ini. Returns 1 if there is something to watch. */
 static int LoadConfig(void)
 {
     wchar_t appdata[MAX_PATH];
@@ -452,7 +452,12 @@ static int LoadConfig(void)
 
     if (!GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH)) return 0;
     wcscpy_s(g_cfgPath, MAX_PATH, appdata);
-    wcscat_s(g_cfgPath, MAX_PATH, L"\\grimnotif");
+    {   /* renamed from grimnotif: carry the old settings over once */
+        wchar_t old[MAX_PATH];
+        swprintf_s(old, MAX_PATH, L"%s\\grimnotif", appdata);
+        wcscat_s(g_cfgPath, MAX_PATH, L"\\pigeon");
+        if (GetFileAttributesW(g_cfgPath) == INVALID_FILE_ATTRIBUTES) MoveFileW(old, g_cfgPath);
+    }
     CreateDirectoryW(g_cfgPath, NULL);
     wcscat_s(g_cfgPath, MAX_PATH, L"\\config.ini");
 
@@ -1201,7 +1206,7 @@ static void TlsClose(Tls *t)
 static void UpdateTip(void)
 {
     static const wchar_t *names[] = {L"connecting", L"connected", L"offline, retrying", L"login failed"};
-    wchar_t tip[128] = L"grimnotif", line[128];
+    wchar_t tip[128] = L"pigeon", line[128];
     int i;
     for (i = 0; i < g_nacc; i++) {
         if (!g_acc[i].enabled) continue;
@@ -1787,7 +1792,7 @@ static int FetchNew(Tls *t)
     return 1;
 }
 
-/* state.ini next to config.ini: last UID seen per account, so mail that arrives while grimnotif is off still shows */
+/* state.ini next to config.ini: last UID seen per account, so mail that arrives while pigeon is off still shows */
 static void StatePath(wchar_t *p)
 {
     wcscpy_s(p, MAX_PATH, g_cfgPath);
@@ -1883,7 +1888,7 @@ static int ImapSession(Tls *t)
     if (r == 0) return -1;
     if (r < 0) return 0;
     if (!Cmd(t, "SELECT INBOX", tag) || WaitOk(t, tag, &uidnext) != 1 || !uidnext) return 0;
-    if (!t->acc->uidnext) {             /* first connect since start: pick up mail that came while grimnotif was off */
+    if (!t->acc->uidnext) {             /* first connect since start: pick up mail that came while pigeon was off */
         unsigned long saved = UidLoad(t->acc);
         t->acc->uidnext = (saved && saved <= uidnext) ? (saved + 200 < uidnext ? uidnext - 200 : saved) : uidnext;
     }
@@ -1993,19 +1998,19 @@ static void ListAdd(HWND lv, int i)
 
 static int AutoStartGet(void)
 {
-    return RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, L"grimnotif", RRF_RT_REG_SZ, NULL, NULL, NULL) == ERROR_SUCCESS;
+    return RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, L"pigeon", RRF_RT_REG_SZ, NULL, NULL, NULL) == ERROR_SUCCESS;
 }
 
-/* Windows starts grimnotif at login via HKCU Run (the per-user startup list in Task Manager). */
+/* Windows starts pigeon at login via HKCU Run (the per-user startup list in Task Manager). */
 static void AutoStartSet(int on)
 {
     if (on) {
         wchar_t self[MAX_PATH], val[MAX_PATH + 4];
         GetModuleFileNameW(NULL, self, MAX_PATH);
         swprintf_s(val, MAX_PATH + 4, L"\"%s\"", self);
-        RegSetKeyValueW(HKEY_CURRENT_USER, RUN_KEY, L"grimnotif", REG_SZ, val, (DWORD)((wcslen(val) + 1) * sizeof(wchar_t)));
+        RegSetKeyValueW(HKEY_CURRENT_USER, RUN_KEY, L"pigeon", REG_SZ, val, (DWORD)((wcslen(val) + 1) * sizeof(wchar_t)));
     } else {
-        RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, L"grimnotif");
+        RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, L"pigeon");
     }
 }
 
@@ -2020,7 +2025,7 @@ static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
         GetDlgItemTextW(d, IDC_EMAIL, we, 256);
         WideCharToMultiByte(CP_UTF8, 0, we, -1, e8, sizeof e8, NULL, NULL);
         pv = Prov(e8);
-        if (pv->kind == 2) MessageBoxW(d, L"Outlook and Hotmail need no app password: leave it empty and click Add to sign in with Microsoft.", L"grimnotif", MB_ICONINFORMATION);
+        if (pv->kind == 2) MessageBoxW(d, L"Outlook and Hotmail need no app password: leave it empty and click Add to sign in with Microsoft.", L"pigeon", MB_ICONINFORMATION);
         else {
             MultiByteToWideChar(CP_UTF8, 0, pv->help, -1, wu, 256);
             ShellExecuteW(d, L"open", wu, NULL, NULL, SW_SHOWNORMAL);
@@ -2042,12 +2047,12 @@ static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
         PassSeal(a->pass);
         Trim(a->email);
         if (!strchr(a->email, '@') || (o == 0 && Prov(a->email)->kind != 2)) {
-            MessageBoxW(d, L"Enter the email address and its app password.", L"grimnotif", MB_ICONWARNING);
+            MessageBoxW(d, L"Enter the email address and its app password.", L"pigeon", MB_ICONWARNING);
             return TRUE;
         }
         for (k = 0; k < g_nedit; k++)
             if (_stricmp(g_edit[k].email, a->email) == 0) {
-                MessageBoxW(d, L"That account is already in the list.", L"grimnotif", MB_ICONWARNING);
+                MessageBoxW(d, L"That account is already in the list.", L"pigeon", MB_ICONWARNING);
                 return TRUE;
             }
         if (Prov(a->email)->kind == 2 && !MsSignIn(d, a)) return TRUE;   /* after the duplicate check: no sign-in for nothing */
@@ -2112,7 +2117,7 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
     case WM_COMMAND:
         switch (LOWORD(w)) {
         case IDC_ADD:
-            if (g_nedit >= MAX_ACC) { MessageBoxW(d, L"Up to 8 accounts.", L"grimnotif", MB_ICONINFORMATION); break; }
+            if (g_nedit >= MAX_ACC) { MessageBoxW(d, L"Up to 8 accounts.", L"pigeon", MB_ICONINFORMATION); break; }
             if (DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_ADD), d, AddProc, 0) == IDOK) ListAdd(lv, g_nedit++);
             break;
         case IDC_REMOVE: {
@@ -2174,7 +2179,7 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
             g_muteCat = IsDlgButtonChecked(d, IDC_MUTECAT) == BST_CHECKED;
             SecureZeroMemory(g_edit, sizeof g_edit);
             AutoStartSet(IsDlgButtonChecked(d, IDC_AUTOSTART) == BST_CHECKED);
-            if (!SaveConfig()) { MessageBoxW(d, L"Could not save settings.", L"grimnotif", MB_ICONERROR); break; }
+            if (!SaveConfig()) { MessageBoxW(d, L"Could not save settings.", L"pigeon", MB_ICONERROR); break; }
             EndDialog(d, IDOK);
             break;
         }
@@ -2294,7 +2299,7 @@ static void Notice(const wchar_t *subj)
 {
     NewMail *nm = calloc(1, sizeof *nm);
     if (!nm) return;
-    wcscpy_s(nm->from, 256, L"grimnotif");
+    wcscpy_s(nm->from, 256, L"pigeon");
     wcscpy_s(nm->subj, 256, subj);
     wcscpy_s(nm->url, 512, L"https://mail.google.com/mail/#inbox");
     PostMessageW(g_main, WM_NEWMAIL, 0, (LPARAM)nm);
@@ -2785,13 +2790,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
     INITCOMMONCONTROLSEX icc;
     int configured;
 
-    g_mutex = CreateMutexW(NULL, FALSE, L"grimnotif-singleton");
+    g_mutex = CreateMutexW(NULL, FALSE, L"pigeon-singleton");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;   /* already running */
     g_inst = hInst;
     icc.dwSize = sizeof icc;
     icc.dwICC = ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES;
     InitCommonControlsEx(&icc);
     configured = LoadConfig();
+    if (RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, L"grimnotif", RRF_RT_REG_SZ, NULL, NULL, NULL) == ERROR_SUCCESS) {
+        RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, L"grimnotif");   /* old name's autostart: point it at this exe */
+        AutoStartSet(1);
+    }
 
     memset(&wc, 0, sizeof wc);
     wc.cbSize = sizeof wc;
@@ -2866,7 +2875,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAY;
     g_nid.hIcon = g_baseIcon = LoadImageW(hInst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
-    wcscpy_s(g_nid.szTip, 128, L"grimnotif");
+    wcscpy_s(g_nid.szTip, 128, L"pigeon");
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 
     if (!configured) {                        /* first run or nothing enabled: ask */

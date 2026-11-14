@@ -1,6 +1,6 @@
-/* Self-check for grimnotif's IMAP parts. Build: cl /utf-8 /DUNICODE /D_UNICODE test_imap.c  then run test_imap.exe */
+/* Self-check for pigeon's IMAP parts. Build: cl /utf-8 /DUNICODE /D_UNICODE test_imap.c  then run test_imap.exe */
 #define wWinMain grim_wWinMain
-#include "grimnotif.c"
+#include "pigeon.c"
 #undef wWinMain
 #include <assert.h>
 
@@ -86,7 +86,7 @@ int main(void)
     g_nacc = 1;
     t->acc = &g_acc[0];
     t->acc->sock = INVALID_SOCKET;
-    strcpy_s(t->acc->email, sizeof t->acc->email, "grimnotif.selftest@gmail.com");
+    strcpy_s(t->acc->email, sizeof t->acc->email, "pigeon.selftest@gmail.com");
     strcpy_s(t->acc->pass, sizeof t->acc->pass, "aaaabbbbccccdddd");
     PassSeal(t->acc->pass);
     assert(strcmp(t->acc->pass, "aaaabbbbccccdddd") != 0);   /* sealed in memory */

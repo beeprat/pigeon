@@ -1,4 +1,4 @@
-# grimnotif
+# pigeon
 
 Tiny Windows tray app that pops up new mail instantly: Gmail, Outlook/Hotmail, Yahoo, AOL, iCloud, GMX, Web.de, Yandex, Fastmail, Zoho. One ~260 KB exe, ~5 MB RAM, no install, no browser tab needed.
 
@@ -16,7 +16,7 @@ Tiny Windows tray app that pops up new mail instantly: Gmail, Outlook/Hotmail, Y
 
 ## Setup
 
-1. Download `grimnotif.exe` from [Releases](../../releases) and run it.
+1. Download `pigeon.exe` from [Releases](../../releases) and run it.
 2. Click **Add...** and enter your email address.
    - **Gmail, Yahoo, AOL, iCloud, Yandex, Fastmail, Zoho:** create an app password (the **Get app password...** button opens the right page; 2-step verification must be on) and paste it.
    - **Outlook, Hotmail, Live:** leave the password empty and click **Add**; sign in on the Microsoft page that opens.
@@ -25,23 +25,23 @@ Tiny Windows tray app that pops up new mail instantly: Gmail, Outlook/Hotmail, Y
 
 Other domains are treated as Google Workspace (Gmail).
 
-To start with Windows: put a shortcut to `grimnotif.exe` in `shell:startup`.
+To start with Windows: put a shortcut to `pigeon.exe` in `shell:startup`.
 
 ## Security
 
-Passwords and tokens are encrypted with Windows DPAPI; grimnotif only talks to your mail provider over TLS. Details and how to verify downloads: [SECURITY.md](SECURITY.md).
+Passwords and tokens are encrypted with Windows DPAPI; pigeon only talks to your mail provider over TLS. Details and how to verify downloads: [SECURITY.md](SECURITY.md).
 
 ## Outlook sign-in (for builders)
 
-Outlook needs a Microsoft app ID. Register a free app at https://entra.microsoft.com: *App registrations* → *New*, account type **Personal Microsoft accounts only**, platform **Mobile and desktop applications**, then *Authentication* → **Allow public client flows: Yes**. Put the Application (client) ID in `MS_CLIENT_ID` in `grimnotif.c`. It is not a secret.
+Outlook needs a Microsoft app ID. Register a free app at https://entra.microsoft.com: *App registrations* → *New*, account type **Personal Microsoft accounts only**, platform **Mobile and desktop applications**, then *Authentication* → **Allow public client flows: Yes**. Put the Application (client) ID in `MS_CLIENT_ID` in `pigeon.c`. It is not a secret.
 
 ## Build
 
 From an x64 Native Tools prompt (Visual Studio Build Tools):
 
 ```
-rc /nologo /fo grimnotif.res grimnotif.rc
-cl /nologo /MT /O1 /W3 /sdl /guard:cf /D_CRT_SECURE_NO_WARNINGS /DUNICODE /D_UNICODE grimnotif.c grimnotif.res /link /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /CETCOMPAT /guard:cf
+rc /nologo /fo pigeon.res pigeon.rc
+cl /nologo /MT /O1 /W3 /sdl /guard:cf /D_CRT_SECURE_NO_WARNINGS /DUNICODE /D_UNICODE pigeon.c pigeon.res /link /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /CETCOMPAT /guard:cf
 ```
 
 Tests: `cl /utf-8 /DUNICODE /D_UNICODE test_imap.c && test_imap.exe`. Fuzzing: see `fuzz.c`.
