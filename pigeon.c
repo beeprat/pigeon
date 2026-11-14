@@ -965,6 +965,33 @@ static void ApplyBar(HWND h)
 }
 
 /* E archive, S star, Z snooze (then 1-4 pick the time), Esc close: only while the mouse is on the popup (it never takes focus, so hotkeys) */
+/* Tooltip over the popup's bar buttons; b = button under the mouse, -1 hides it */
+static void BtnTip(HWND h, int b)
+{
+    static const wchar_t *act[NBTN] = {L"Mark as read", L"Archive (E)", L"Star (S)", L"Snooze (Z)"};
+    static const wchar_t *snz[NBTN] = {L"10 minutes (1)", L"1 hour (2)", L"3 hours (3)", L"8 hours (4)"};
+    static HWND tip;
+    static TTTOOLINFOW ti;
+    RECT r;
+    if (!tip) {
+        tip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+                              0, 0, 0, 0, h, NULL, g_inst, NULL);
+        ti.cbSize = sizeof ti;
+        ti.uFlags = TTF_TRACK | TTF_ABSOLUTE;
+        ti.hwnd = h;
+        ti.lpszText = L"";
+        SendMessageW(tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+    }
+    if (b < 0 || b >= NBTN) { SendMessageW(tip, TTM_TRACKACTIVATE, FALSE, (LPARAM)&ti); return; }
+    ti.lpszText = (wchar_t *)(g_snzMode ? snz[b] : act[b]);
+    SendMessageW(tip, TTM_UPDATETIPTEXTW, 0, (LPARAM)&ti);
+    r = BtnRect(h, b);
+    OffsetRect(&r, 0, VisTop());
+    MapWindowPoints(h, NULL, (POINT *)&r, 2);
+    SendMessageW(tip, TTM_TRACKPOSITION, 0, MAKELPARAM(r.left, r.bottom + DP(4)));
+    SendMessageW(tip, TTM_TRACKACTIVATE, TRUE, (LPARAM)&ti);
+}
+
 static void Keys(HWND h, int on)
 {
     static const UINT vk[] = {'E', 'S', 'Z', VK_ESCAPE, '1', '2', '3', '4'};
@@ -977,6 +1004,7 @@ static void Keys(HWND h, int on)
 
 static void HidePopup(HWND h)
 {
+    BtnTip(h, -1);
     KillTimer(h, TIMER_HIDE);
     KillTimer(h, TIMER_FADE);
     KillTimer(h, TIMER_FADEIN);
@@ -1071,7 +1099,7 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         int b = BtnAt(h, (short)LOWORD(l), (short)HIWORD(l) - VisTop());
         POINT pt = {(short)LOWORD(l), (short)HIWORD(l) - VisTop()};
         int sh = PtInRect(&g_subjRect, pt);
-        if (b != g_hot || sh != g_subjHot) { g_hot = b; g_subjHot = sh; InvalidateRect(h, NULL, FALSE); }
+        if (b != g_hot || sh != g_subjHot) { g_hot = b; g_subjHot = sh; BtnTip(h, b); InvalidateRect(h, NULL, FALSE); }
         if (!g_hover) {                         /* hold the popup while the mouse is on it */
             TRACKMOUSEEVENT te;
             te.cbSize = sizeof te;
@@ -1112,6 +1140,7 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         Keys(h, 0);
         g_hover = 0;
         g_hot = -1;
+        BtnTip(h, -1);
         g_snzMode = 0;
         g_subjHot = 0;
         if (IsWindowVisible(h)) HoverSize(h, 0);
@@ -3169,6 +3198,7 @@ static void PopupAction(int b)
         Snooze(mins[b]);
     } else if (b == 3) {                /* bar turns into the snooze times; leaving the popup turns it back */
         g_snzMode = 1;
+        BtnTip(g_popup, b);
         InvalidateRect(g_popup, NULL, FALSE);
         return;
     } else if (g_cur.acc && g_cur.uid) {
@@ -3626,7 +3656,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;   /* already running */
     g_inst = hInst;
     icc.dwSize = sizeof icc;
-    icc.dwICC = ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES;
+    icc.dwICC = ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES | ICC_BAR_CLASSES;   /* BAR: tooltips */
     InitCommonControlsEx(&icc);
     configured = LoadConfig();
     if (RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, L"grimnotif", RRF_RT_REG_SZ, NULL, NULL, NULL) == ERROR_SUCCESS) {
