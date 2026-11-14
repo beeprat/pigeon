@@ -54,8 +54,10 @@ static int g_alpha = 255;       /* popup opacity during fade-out */
 #define IDM_TEST 102
 #define IDM_SETTINGS 103
 #define IDM_TESTMENU 104
+#define IDM_PAUSE 105
 #define IDM_HIST 110            /* 110..119: recent popups */
 static NOTIFYICONDATAW g_nid;
+static UINT g_taskbarMsg;       /* "TaskbarCreated": Explorer restarted, the tray icon is gone */
 
 
 
@@ -111,6 +113,7 @@ struct Account {
     unsigned long uidnext;      /* next UID not yet seen, kept across reconnects */
     int tag;
     volatile int unread;        /* unread mails in the inbox, for the tray badge */
+    int muted;                  /* no popups for this account; still counted in the badge */
 };
 static Account g_acc[MAX_ACC];
 static int g_nacc;
@@ -457,6 +460,8 @@ static int SaveConfig(void)
     }
     for (i = 0; i < g_nacc; i++)        /* own key, not a 4th account field: older versions would misread that */
         if (!g_acc[i].removed && g_acc[i].nick[0]) fprintf(f, "nick=%s|%s\r\n", g_acc[i].email, g_acc[i].nick);
+    for (i = 0; i < g_nacc; i++)
+        if (!g_acc[i].removed && g_acc[i].muted) fprintf(f, "muted=%s\r\n", g_acc[i].email);
     fprintf(f, "popup=%d\r\nsound=%d\r\ncorner=%d\r\n", g_popupMs / 1000, g_sound, g_corner);
     fprintf(f, "fullhold=%d\r\nquiet=%d\r\nquietfrom=%02d:%02d\r\nquietto=%02d:%02d\r\n", g_fullHold, g_quiet,
             g_quietFrom / 60, g_quietFrom % 60, g_quietTo / 60, g_quietTo % 60);
@@ -554,6 +559,10 @@ static int LoadConfig(void)
             *bar = 0;
             for (j = 0; j < g_nacc; j++)
                 if (_stricmp(g_acc[j].email, v) == 0) strncpy_s(g_acc[j].nick, sizeof g_acc[j].nick, bar + 1, _TRUNCATE);
+        }
+        else if (strcmp(k, "muted") == 0) {
+            int j;
+            for (j = 0; j < g_nacc; j++) if (_stricmp(g_acc[j].email, v) == 0) g_acc[j].muted = 1;
         }
         else if (strcmp(k, "email") == 0)    strncpy_s(oldEmail, sizeof oldEmail, v, _TRUNCATE);   /* old plain-text format */
         else if (strcmp(k, "password") == 0) {
@@ -2088,6 +2097,7 @@ static const wchar_t *TestTo(const Account *a)
 
 #define WM_LISTSTATE (WM_APP + 7)  /* to Settings: an account's state changed */
 static HWND g_settings;
+static int g_editOk;            /* rename asked by F2 or the menu; a slow second click doesn't count */
 
 static int RowAcc(HWND lv, int row)
 {
@@ -2104,7 +2114,9 @@ static void ListStatus(HWND lv)
     int row, n = ListView_GetItemCount(lv);
     for (row = 0; row < n; row++) {
         Account *a = &g_acc[RowAcc(lv, row)];
-        ListView_SetItemText(lv, row, 1, a->enabled ? (wchar_t *)names[a->state & 3] : L"off");
+        wchar_t t[40];
+        swprintf_s(t, 40, L"%s%s", a->enabled ? names[a->state & 3] : L"off", a->muted ? L", muted" : L"");
+        ListView_SetItemText(lv, row, 1, t);
     }
 }
 
@@ -2410,6 +2422,20 @@ static LRESULT CALLBACK LvProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, 
         }
     }
     if (m == WM_SAVECOLS) { SaveCols(h); return 0; }
+    if (m == WM_PAINT && ListView_GetItemCount(h) == 0) {   /* empty: say what to do */
+        LRESULT r = DefSubclassProc(h, m, w, l);
+        HDC dc = GetDC(h);
+        RECT rc, hr;
+        GetClientRect(h, &rc);
+        GetWindowRect(ListView_GetHeader(h), &hr);
+        rc.top += hr.bottom - hr.top;
+        SelectObject(dc, (HFONT)SendMessageW(h, WM_GETFONT, 0, 0));
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, Gr(150));
+        DrawTextW(dc, L"No accounts yet. Click Add to start.", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        ReleaseDC(h, dc);
+        return r;
+    }
     if (m == WM_CTLCOLOREDIT) {         /* the rename box */
         SetTextColor((HDC)w, INK);
         SetBkColor((HDC)w, FIELD);
@@ -2432,7 +2458,9 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
         RECT tr;
         FillRect(dc, &ps.rcPaint, g_bgBrush);
         if (hh) {                       /* header: logo and title where Windows had its title bar */
-            DrawIconEx(dc, DP(14), (hh - DP(18)) / 2, g_nid.hIcon, DP(18), DP(18), 0, NULL, DI_NORMAL);
+            static HICON darkIcon;       /* icon 2: dark pigeon, for the light look; tray keeps icon 1 (taskbar has its own theme) */
+            if (g_light && !darkIcon) darkIcon = LoadImageW(g_inst, MAKEINTRESOURCEW(2), IMAGE_ICON, DP(18), DP(18), 0);
+            DrawIconEx(dc, DP(14), (hh - DP(18)) / 2, g_light && darkIcon ? darkIcon : g_nid.hIcon, DP(18), DP(18), 0, NULL, DI_NORMAL);
             GetWindowTextW(d, title, 64);
             GetClientRect(d, &tr);
             tr.left = DP(42);
@@ -2742,7 +2770,7 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         if (nm->hdr.code == NM_DBLCLK) { SendMessageW(d, WM_COMMAND, IDC_FIX, 0); return TRUE; }
         if (nm->hdr.code == LVN_COLUMNCLICK) { SortList(lv, nm->iSubItem); return TRUE; }
         if (nm->hdr.code == LVN_KEYDOWN && ((NMLVKEYDOWN *)l)->wVKey == VK_F2) {   /* ListView has no F2 of its own */
-            if ((i = ListView_GetNextItem(lv, -1, LVNI_SELECTED)) >= 0) ListView_EditLabel(lv, i);
+            if ((i = ListView_GetNextItem(lv, -1, LVNI_SELECTED)) >= 0) { g_editOk = 1; ListView_EditLabel(lv, i); }
             return TRUE;
         }
         if (nm->hdr.code == NM_RCLICK && ((NMITEMACTIVATE *)l)->iItem >= 0) {   /* right-click menu on an account */
@@ -2751,13 +2779,15 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
             int row = ((NMITEMACTIVATE *)l)->iItem, cmd;
             ListView_SetItemState(lv, row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
             AppendMenuW(pm, MF_STRING, 1, L"Set nickname...	F2");
+            AppendMenuW(pm, MF_STRING | (g_acc[RowAcc(lv, row)].muted ? MF_CHECKED : 0), 4, L"Mute popups");
             AppendMenuW(pm, MF_STRING, 2, L"Fix sign-in");
             AppendMenuW(pm, MF_SEPARATOR, 0, NULL);
             AppendMenuW(pm, MF_STRING, 3, L"Remove");
             GetCursorPos(&pt);
             cmd = TrackPopupMenu(pm, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, d, NULL);
             DestroyMenu(pm);
-            if (cmd == 1) { SetFocus(lv); ListView_EditLabel(lv, row); }
+            if (cmd == 1) { SetFocus(lv); g_editOk = 1; ListView_EditLabel(lv, row); }
+            if (cmd == 4 && (i = RowAcc(lv, row)) >= 0) { g_acc[i].muted = !g_acc[i].muted; ListStatus(lv); SaveConfig(); }
             if (cmd == 2) SendMessageW(d, WM_COMMAND, IDC_FIX, 0);
             if (cmd == 3) SendMessageW(d, WM_COMMAND, IDC_REMOVE, 0);
             return TRUE;
@@ -2766,7 +2796,8 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
             NMLVDISPINFOW *di = (NMLVDISPINFOW *)l;
             HWND ed = ListView_GetEditControl(lv);
             wchar_t w[64];
-            if ((i = RowAcc(lv, di->item.iItem)) < 0) { SetWindowLongPtrW(d, DWLP_MSGRESULT, TRUE); return TRUE; }
+            if (!g_editOk || (i = RowAcc(lv, di->item.iItem)) < 0) { g_editOk = 0; SetWindowLongPtrW(d, DWLP_MSGRESULT, TRUE); return TRUE; }
+            g_editOk = 0;
             MultiByteToWideChar(CP_UTF8, 0, g_acc[i].nick, -1, w, 64);
             SetWindowTextW(ed, w);
             SendMessageW(ed, EM_SETLIMITTEXT, 40, 0);
@@ -3216,10 +3247,14 @@ static INT_PTR CALLBACK TestProc(HWND d, UINT m, WPARAM w, LPARAM l)
     return TRUE;
 }
 
+static int g_reopen;             /* theme changed while Settings was open: open it again */
 static void OpenSettings(void)
 {
     if (g_settings) { SetForegroundWindow(g_settings); return; }
-    DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_SETTINGS), NULL, SettingsProc, 0);
+    do {
+        g_reopen = 0;
+        DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_SETTINGS), NULL, SettingsProc, 0);
+    } while (g_reopen);
 }
 
 /* ---------- Tray badge ---------- */
@@ -3363,10 +3398,12 @@ static void UpdateBadge(void)
 
 /* ---------- Do not disturb ---------- */
 
+static ULONGLONG g_pauseUntil;  /* tray "Pause popups": until then, held like quiet hours */
 static int InQuietHours(void)
 {
     SYSTEMTIME st;
     int now;
+    if (NowMs() < g_pauseUntil) return 1;
     if (!g_quiet || g_quietFrom == g_quietTo) return 0;
     GetLocalTime(&st);
     now = st.wHour * 60 + st.wMinute;
@@ -3454,6 +3491,7 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (g_settings) PostMessageW(g_settings, WM_LISTSTATE, 0, 0);
         return 0;
     case WM_NEWMAIL:
+        if (((NewMail *)l)->acc && ((NewMail *)l)->acc->muted) { free((NewMail *)l); return 0; }   /* muted account */
         if (InQuietHours()) {           /* no popup now; one summary when quiet hours end (TIMER_QUIET) */
             NewMail *nm = (NewMail *)l;
             g_held++;
@@ -3471,6 +3509,9 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_SAVECFG:
         SaveConfig();
         return 0;
+    default:
+        if (m == g_taskbarMsg && m) { Shell_NotifyIconW(NIM_ADD, &g_nid); UpdateBadge(); return 0; }   /* Explorer restarted */
+        break;
     case WM_TRAY:
         if (l == WM_LBUTTONUP) {        /* inbox of the account with the most unread; Settings is in the right-click menu */
             wchar_t url[512] = L"https://mail.google.com/mail/#inbox";
@@ -3496,6 +3537,7 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 AppendMenuW(menu, MF_POPUP, (UINT_PTR)sub, L"Recent");   /* destroyed with menu */
                 AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
             }
+            AppendMenuW(menu, MF_STRING, IDM_PAUSE, NowMs() < g_pauseUntil ? L"Resume popups" : L"Pause popups for 1 hour");
             AppendMenuW(menu, MF_STRING, IDM_SETTINGS, L"Settings...");
             AppendMenuW(menu, MF_STRING, IDM_TEST, L"Test");
             AppendMenuW(menu, MF_STRING, IDM_TESTMENU, L"Test menu...");
@@ -3518,6 +3560,10 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 else ShowNext();
             }
         }
+        if (LOWORD(w) == IDM_PAUSE) {
+            g_pauseUntil = NowMs() < g_pauseUntil ? 0 : NowMs() + 3600000;
+            if (!g_pauseUntil) SendMessageW(h, WM_TIMER, TIMER_QUIET, 0);   /* resumed: held summary now, not in a minute */
+        }
         if (LOWORD(w) == IDM_SETTINGS) OpenSettings();
         if (LOWORD(w) == IDM_TESTMENU) {
             static int open;
@@ -3527,7 +3573,14 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (LOWORD(w) == IDM_EXIT) DestroyWindow(h);
         return 0;
     case WM_SETTINGCHANGE:              /* light/dark switched: windows opened from now on follow */
-        if (l && wcscmp((const wchar_t *)l, L"ImmersiveColorSet") == 0) g_light = ReadLight();
+        if (l && wcscmp((const wchar_t *)l, L"ImmersiveColorSet") == 0 && ReadLight() != g_light) {
+            g_light = !g_light;
+            if (g_settings && IsWindowEnabled(g_settings)) {   /* not while Add is open over it */
+                g_reopen = 1;
+                PostMessageW(g_settings, WM_COMMAND, IDCANCEL, 0);
+            }
+            if (g_popup) InvalidateRect(g_popup, NULL, TRUE);
+        }
         break;
     case WM_DESTROY:
         Shell_NotifyIconW(NIM_DELETE, &g_nid);
@@ -3572,6 +3625,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
     RegisterClassExW(&wc);
 
     g_dpi = GetDpiForSystem();          /* manifest says dpiAware, so draw at real size */
+    g_taskbarMsg = RegisterWindowMessageW(L"TaskbarCreated");
     g_light = wcsstr(cmd, L"--light") ? 1 : wcsstr(cmd, L"--dark") ? 0 : ReadLight();   /* flags: preview either look */
     g_fontBig = MakeFont(DP(-16), FW_NORMAL);
     {

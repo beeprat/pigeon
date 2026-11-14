@@ -19,5 +19,9 @@ o.ellipse([262, 295, 307, 340], fill=(40, 40, 40, 255))                     # ey
 
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pigeon.ico')
 im.save(out, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (256, 256)])
+dark = Image.new('RGBA', (S, S), (0, 0, 0, 0))                           # light look: dark pigeon, white eye
+dark.paste((40, 40, 40, 255), (0, 0), mask)
+ImageDraw.Draw(dark).ellipse([262, 295, 307, 340], fill=(255, 255, 255, 255))
+dark.save(out.replace('pigeon.ico', 'pigeon_dark.ico'), sizes=[(16, 16), (24, 24), (32, 32), (48, 48)])
 if os.environ.get('PREVIEW_DIR'): im.resize((256, 256), Image.LANCZOS).save(os.path.join(os.environ['PREVIEW_DIR'], 'icon_preview.png'))
 print(out)
