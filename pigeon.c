@@ -900,10 +900,10 @@ static void DrawButtons(HWND h, HDC dc)
         double t = (double)(GetTickCount64() - g_seenStart) / SEEN_MS, p, e;
         if (t > 1) t = 1;
         p = t < 0.7 ? t / 0.7 : 1;
-        e = p < 0.5 ? 4 * p * p * p : 1 - 4 * (1 - p) * (1 - p) * (1 - p);   /* ease in and out */
+        e = 1 - pow(1 - p, 5);          /* quick start, long gentle arrival */
         int k = (int)(255 * (1 - p));
         RECT rc, r = BtnRect(h, 0);
-        wchar_t g = 0xE8A8;             /* MailFill: solid envelope */
+        wchar_t g = t < 0.7 ? 0xE715 : 0xE8C3;   /* Mail (closed) -> Read (open) */
         GetClientRect(h, &rc);
         for (i = 1; i < NBTN; i++) {
             RECT o = BtnRect(h, i);
@@ -914,7 +914,7 @@ static void DrawButtons(HWND h, HDC dc)
         }
         OffsetRect(&r, (int)(((rc.right - (r.right - r.left)) / 2 - r.left) * e), 0);
         SmoothRound(dc, r, DP(8), BarFade(Gr(48)));
-        if (t >= 0.7) OffsetRect(&r, 0, -(int)(DP(4) * sin(3.14159 * (t - 0.7) / 0.3) + 0.5));   /* little hop on arrival */
+        if (t >= 0.7) OffsetRect(&r, 0, -(int)(DP(4) * sin(3.14159 * (t - 0.7) / 0.3) + 0.5));   /* little hop as it opens */
         of = SelectObject(dc, g_fontIcon);
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, BarFade(Gr(255)));
