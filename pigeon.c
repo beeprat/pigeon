@@ -631,7 +631,8 @@ static int g_pw, g_ph;          /* popup size without the button bar */
 static int g_bar, g_barOn;      /* button bar: current height in px, sliding open or shut */
 static HFONT g_fontIcon, g_fontIconS;   /* g_fontIconS: the small close cross */
 static int g_hot = -1;          /* button under the mouse */
-#define ANIM_MS 900              /* "mark as read" animation length */
+#define SLIDE_MS 630             /* the slide to the middle */
+#define ANIM_MS 1000              /* "mark as read" animation length */
 static int g_anim;               /* button + 1 whose animation is playing, 0 none */
 static int g_animSnz;            /* it was a snooze time: label melts into a clock */
 static ULONGLONG g_animStart;    /* its GetTickCount64 start: frames follow the clock, not the timer's uneven ticks */
@@ -882,6 +883,41 @@ static void SmoothRound(HDC dc, RECT r, int rad, COLORREF fill)
     DeleteDC(m);
 }
 
+/* a..b by k/255 */
+static COLORREF Mix(COLORREF a, COLORREF b, int k)
+{
+    return RGB(GetRValue(a) + (GetRValue(b) - GetRValue(a)) * k / 255,
+               GetGValue(a) + (GetGValue(b) - GetGValue(a)) * k / 255,
+               GetBValue(a) + (GetBValue(b) - GetBValue(a)) * k / 255);
+}
+
+/* Antialiased clock face at (cx, cy): drawn 4x and shrunk; ang turns the minute hand (0 = 12 o'clock) */
+static void DrawClock(HDC dc, int cx, int cy, int rad, double ang, COLORREF ink, COLORREF bgc)
+{
+    const int S = 4;
+    int sz = 2 * rad + 4, c = sz * S / 2;
+    HDC m = CreateCompatibleDC(dc);
+    HBITMAP bm = CreateCompatibleBitmap(dc, sz * S, sz * S);
+    HGDIOBJ obm = SelectObject(m, bm), op, ob;
+    HBRUSH bb = CreateSolidBrush(bgc);
+    HPEN pen = CreatePen(PS_SOLID, DP(1) * S + S / 2, ink);
+    RECT all = {0, 0, sz * S, sz * S};
+    double ha = ang / 12 + 3.14159 * 5 / 6;   /* hour hand starts near 5 and creeps */
+    FillRect(m, &all, bb);
+    op = SelectObject(m, pen);
+    ob = SelectObject(m, GetStockObject(NULL_BRUSH));
+    Ellipse(m, c - rad * S, c - rad * S, c + rad * S, c + rad * S);
+    MoveToEx(m, c, c, NULL); LineTo(m, c + (int)(sin(ang) * rad * S * 0.62), c - (int)(cos(ang) * rad * S * 0.62));
+    MoveToEx(m, c, c, NULL); LineTo(m, c + (int)(sin(ha) * rad * S * 0.4), c - (int)(cos(ha) * rad * S * 0.4));
+    SelectObject(m, op); SelectObject(m, ob);
+    SetStretchBltMode(dc, HALFTONE);
+    SetBrushOrgEx(dc, 0, 0, NULL);
+    StretchBlt(dc, cx - sz / 2, cy - sz / 2, sz, sz, m, 0, 0, sz * S, sz * S, SRCCOPY);
+    SelectObject(m, obm);
+    DeleteObject(bm); DeleteObject(bb); DeleteObject(pen);
+    DeleteDC(m);
+}
+
 /* c faded toward the background by how far the bar has slid open */
 static COLORREF BarFade(COLORREF c)
 {
@@ -897,44 +933,59 @@ static void DrawButtons(HWND h, HDC dc)
     static const wchar_t glyph[NBTN] = {0xE8C3, 0xE7B8, 0xE734, 0xE823};   /* read, archive, star, clock */
     HGDIOBJ of;
     int i;
-    if (g_anim) {                       /* clicked: the others fade, it slides to the middle, then its icon plays */
+    if (g_anim) {                       /* clicked: the others fade, it slides to the middle, its icon plays */
         static const wchar_t *times[NBTN] = {L"10 min", L"1 hour", L"3 hours", L"8 hours"};
-        static const wchar_t from[NBTN] = {0xE715, 0xE7B8, 0xE734, 0xE823}, to[NBTN] = {0xE8C3, 0xE7B8, 0xE735, 0xE823};
-        int b = g_anim - 1, k, dy = 0;
-        double t = (double)(GetTickCount64() - g_animStart) / ANIM_MS, p, e, q;
+        int b = g_anim - 1, k, cx, cy;
+        double el = (double)(GetTickCount64() - g_animStart), p, e, q;
         RECT rc, r = BtnRect(h, b);
         COLORREF fg = BarFade(Gr(255)), bg = BarFade(Gr(48));
-        if (t > 1) t = 1;
-        p = t < 0.7 ? t / 0.7 : 1;
+        if (el > ANIM_MS) el = ANIM_MS;
+        p = el < SLIDE_MS ? el / SLIDE_MS : 1;
         e = 1 - pow(1 - p, 5);          /* quick start, long gentle arrival */
-        q = t < 0.7 ? 0 : (t - 0.7) / 0.3;   /* arrival phase, 0..1 */
+        q = el < SLIDE_MS ? 0 : (el - SLIDE_MS) / (ANIM_MS - SLIDE_MS);   /* after arriving, 0..1 */
         k = (int)(255 * (1 - p));
         GetClientRect(h, &rc);
-        for (i = 0; i < NBTN; i++) {
-            RECT o = BtnRect(h, i);
-            COLORREF c = BarFade(Gr(22));
-            if (i == b) continue;
-            SmoothRound(dc, o, DP(8), RGB(GetRValue(BG) + (GetRValue(c) - GetRValue(BG)) * k / 255,
-                                          GetGValue(BG) + (GetGValue(c) - GetGValue(BG)) * k / 255,
-                                          GetBValue(BG) + (GetBValue(c) - GetBValue(BG)) * k / 255));
-        }
+        for (i = 0; i < NBTN; i++)
+            if (i != b) SmoothRound(dc, BtnRect(h, i), DP(8), Mix(BG, BarFade(Gr(22)), k));
         OffsetRect(&r, (int)(((rc.right - (r.right - r.left)) / 2 - r.left) * e), 0);
         SmoothRound(dc, r, DP(8), bg);
+        cx = (r.left + r.right) / 2; cy = (r.top + r.bottom) / 2;
         SetBkMode(dc, TRANSPARENT);
-        if (g_animSnz) {                /* the time label fades out, the clock fades in */
-            int a = q < 0.5 ? (int)(255 * (1 - 2 * q)) : (int)(255 * (2 * q - 1));
-            COLORREF c = RGB(GetRValue(bg) + (GetRValue(fg) - GetRValue(bg)) * a / 255,
-                             GetGValue(bg) + (GetGValue(fg) - GetGValue(bg)) * a / 255,
-                             GetBValue(bg) + (GetBValue(fg) - GetBValue(bg)) * a / 255);
-            SetTextColor(dc, c);
-            of = SelectObject(dc, q < 0.5 ? g_fontSmall : g_fontIcon);
-            if (q < 0.5) DrawTextW(dc, times[b], -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-            else DrawTextW(dc, &to[3], 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        } else {
-            wchar_t g = q > 0 ? to[b] : from[b];
-            if (q > 0) dy = (int)(DP(4) * sin(3.14159 * q) + 0.5);
-            OffsetRect(&r, 0, b == 1 ? dy : -dy);   /* archive dips into the box; read and star hop */
-            of = SelectObject(dc, g_fontIcon);
+        of = SelectObject(dc, g_fontIcon);
+        if (g_animSnz) {                /* the time label fades into a clock on the way; its hands go round once */
+            double f = p < 0.5 ? p * 2 : 1, s2 = el < 200 ? 0 : (el - 200) / (ANIM_MS - 200);
+            s2 = s2 < 0.5 ? 2 * s2 * s2 : 1 - 2 * (1 - s2) * (1 - s2);   /* ease in and out */
+            DrawClock(dc, cx, cy, DP(7), 6.28318 * s2, Mix(bg, fg, (int)(255 * f)), bg);   /* first: its square is opaque */
+            if (f < 1) {
+                SelectObject(dc, g_fontSmall);
+                SetTextColor(dc, Mix(bg, fg, (int)(255 * (1 - f))));
+                DrawTextW(dc, times[b], -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            }
+        } else if (b == 1) {            /* archive: an envelope drops into the box */
+            wchar_t box = 0xE7B8, env = 0xE715;
+            int y = cy - DP(12) + (int)(DP(14) * q * q);   /* falls, speeding up */
+            RECT er = {r.left, y - DP(8), r.right, y + DP(8)}, br = r;
+            OffsetRect(&br, 0, DP(3));  /* box sits low: room above it for the envelope */
+            SetTextColor(dc, fg);
+            DrawTextW(dc, &box, 1, &br, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            if (q > 0) {
+                int sv = SaveDC(dc);
+                IntersectClipRect(dc, r.left, r.top, r.right, cy - DP(5));   /* gone once past the lid */
+                SelectObject(dc, g_fontIconS);
+                SetTextColor(dc, Mix(bg, fg, (int)(255 * (q < 0.25 ? q * 4 : 1))));
+                DrawTextW(dc, &env, 1, &er, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                RestoreDC(dc, sv);
+            }
+        } else if (b == 2) {            /* star: fills in from the click on, hops on arrival */
+            wchar_t solid = 0xE735, line = 0xE734;
+            OffsetRect(&r, 0, -(int)(DP(4) * sin(3.14159 * q) + 0.5));
+            SetTextColor(dc, Mix(bg, fg, (int)(255 * p)));
+            DrawTextW(dc, &solid, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            SetTextColor(dc, fg);
+            DrawTextW(dc, &line, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        } else {                        /* read: closed envelope opens and hops */
+            wchar_t g = q > 0 ? 0xE8C3 : 0xE715;
+            OffsetRect(&r, 0, -(int)(DP(4) * sin(3.14159 * q) + 0.5));
             SetTextColor(dc, fg);
             DrawTextW(dc, &g, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         }
