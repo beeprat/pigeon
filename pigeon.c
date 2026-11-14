@@ -3198,7 +3198,7 @@ static void ApplySettings(HWND d)
 }
 
 #ifndef PIGEON_VERSION
-#define PIGEON_VERSION "v1.0"     /* the GitHub release tag this build is: bump it with every release */
+#define PIGEON_VERSION "v1.1"     /* the GitHub release tag this build is: bump it with every release */
 #endif
 #define IDC_UPDATE 1042
 #define UPCAP (16 << 20)
