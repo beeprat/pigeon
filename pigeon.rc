@@ -70,7 +70,7 @@ BEGIN
     PUSHBUTTON      "Cancel", IDCANCEL, 162, 96, 50, 14
 END
 
-103 DIALOGEX 0, 0, 180, 208
+103 DIALOGEX 0, 0, 180, 228
 STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_APPWINDOW
 CAPTION "pigeon test menu"
@@ -85,5 +85,6 @@ BEGIN
     PUSHBUTTON      "Sound only", 3006, 8, 128, 164, 16
     PUSHBUTTON      "Recheck last 5 real mails", 3007, 8, 148, 164, 16
     PUSHBUTTON      "Simulate startup (unread mail)", 3008, 8, 168, 164, 16
-    PUSHBUTTON      "Close", IDCANCEL, 122, 188, 50, 14
+    PUSHBUTTON      "Long text everywhere", 3010, 8, 188, 164, 16
+    PUSHBUTTON      "Close", IDCANCEL, 122, 208, 50, 14
 END

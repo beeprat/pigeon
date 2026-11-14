@@ -3800,10 +3800,11 @@ static void PopupAction(int b)
 #define IDT_RECHECK 3007
 #define IDT_STARTUP 3008
 #define IDT_PROVIDERS 3009
+#define IDT_LONGTEXT 3010
 
 static int g_noBatch;               /* test menu's provider popups still queued: shown one by one, not batched */
 
-static void FakeMailAcc(const wchar_t *from, const wchar_t *subj, const wchar_t *to, Account *acc)
+static void FakeMailAcc(const wchar_t *from, const wchar_t *subj, const wchar_t *to, Account *acc, const wchar_t *prev)
 {
     NewMail *nm = calloc(1, sizeof *nm);
     if (!nm) return;
@@ -3811,13 +3812,13 @@ static void FakeMailAcc(const wchar_t *from, const wchar_t *subj, const wchar_t 
     wcscpy_s(nm->from, 256, from);
     wcscpy_s(nm->subj, 256, subj);
     if (to) wcscpy_s(nm->to, 256, to);
-    wcscpy_s(nm->prev, 300, L"Hi! Just checking in about tomorrow, are we still on for lunch?");
+    wcsncpy_s(nm->prev, 300, prev ? prev : L"Hi! Just checking in about tomorrow, are we still on for lunch?", _TRUNCATE);
     wcscpy_s(nm->url, 512, L"https://mail.google.com/mail/#inbox");
     GetSystemTimeAsFileTime((FILETIME *)&nm->when);
     PostMessageW(g_main, WM_NEWMAIL, 0, (LPARAM)nm);
 }
 
-static void FakeMail(const wchar_t *from, const wchar_t *subj, const wchar_t *to) { FakeMailAcc(from, subj, to, NULL); }
+static void FakeMail(const wchar_t *from, const wchar_t *subj, const wchar_t *to) { FakeMailAcc(from, subj, to, NULL, NULL); }
 
 /* One popup per provider pigeon knows, each from a made-up address on its domain, so every corner logo shows. */
 static void FakeProviders(void)
@@ -3835,7 +3836,7 @@ static void FakeProviders(void)
         sprintf_s(a->email, sizeof a->email, "test@%s", g_prov[i].dom);
         if ((star = strchr(a->email, '*')) != NULL) strcpy_s(star, 4, "com");
         swprintf_s(subj, 64, L"%s test", g_prov[i].name);
-        FakeMailAcc(L"Name of sender", subj, TestTo(a), a);
+        FakeMailAcc(L"Name of sender", subj, TestTo(a), a, NULL);
         n++;
     }
     g_noBatch = (int)n;
@@ -3855,6 +3856,13 @@ static INT_PTR CALLBACK TestProc(HWND d, UINT m, WPARAM w, LPARAM l)
     if (m != WM_COMMAND) return FALSE;
     switch (LOWORD(w)) {
     case IDT_SHORT:  FakeMail(L"Name of sender", L"Subject of the mail", to); break;
+    case IDT_LONGTEXT:                  /* everything long: name and subject get "...", the hovered preview stops at 4 lines */
+        FakeMailAcc(L"A sender with a rather long display name that keeps on going",
+                    L"This is a very long subject line to check how wide the popup gets before it is cut off with dots", to, NULL,
+                    L"Hi! Just checking in about tomorrow, are we still on for lunch? I was thinking of the new place on Main Street "
+                    L"around 12:30, they have a patio and the menu looks great. If that doesn't work, Thursday or Friday are open too, "
+                    L"and I could also do dinner instead. Let me know what suits you best and I'll book a table for us.");
+        break;
     case IDT_LONG:   FakeMail(L"A sender with a rather long display name",
                               L"This is a very long subject line to check how wide the popup gets before it is cut off with dots", to); break;
     case IDT_MORE:   FakeMail(L"Name of sender  +3 more", L"Newest of four mails at once", to); break;
