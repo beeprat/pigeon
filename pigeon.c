@@ -1267,11 +1267,21 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 SelectObject(dc, g_fontSmall);
                 SetTextColor(dc, Gr(165));
                 int more = g_bar < g_more ? g_bar : g_more;   /* opens and closes with the bar, a pixel at a time */
+                int k = g_more ? (g_bar - g_more) * 255 / DP(BAR) : 0;   /* the long text fades while the buttons slide, so it is gone before the space shrinks */
+                if (k < 0) k = 0;
                 tr.top = tr.bottom; tr.bottom = tr.top + g_h3 + g_more;
                 SaveDC(dc);
-                IntersectClipRect(dc, tr.left, tr.top, tr.right, tr.top + g_h3 + more);   /* full text, wiped by the clip */
-                DrawTextW(dc, g_prev, -1, &tr, DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_NOPREFIX
-                          | (more ? DT_WORDBREAK | DT_EDITCONTROL : DT_SINGLELINE));
+                IntersectClipRect(dc, tr.left, tr.top, tr.right, tr.top + g_h3 + more);
+                if (k < 255) {                  /* one line with "...", crossfaded with the long text */
+                    RECT one = tr;
+                    one.bottom = one.top + g_h3;
+                    SetTextColor(dc, Mix(BG, Gr(165), 255 - k));
+                    DrawTextW(dc, g_prev, -1, &one, DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_NOPREFIX | DT_SINGLELINE);
+                }
+                if (k > 0) {
+                    SetTextColor(dc, Mix(BG, Gr(165), k));
+                    DrawTextW(dc, g_prev, -1, &tr, DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_NOPREFIX | DT_WORDBREAK | DT_EDITCONTROL);
+                }
                 RestoreDC(dc, -1);
                 tr.bottom = tr.top + g_h3 + more;   /* the address line follows the edge */
             }
