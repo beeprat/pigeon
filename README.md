@@ -1,6 +1,6 @@
 # pigeon
 
-Tiny Windows tray app that pops up new mail instantly: Gmail, Outlook/Hotmail, Yahoo, AOL, iCloud, GMX, Web.de, Yandex, Fastmail, Zoho. One ~260 KB exe, ~5 MB RAM, no install, no browser tab needed.
+Tiny Windows tray app that pops up new mail instantly: Gmail, Outlook/Hotmail, Yahoo, AOL, iCloud, GMX, Web.de, Yandex, Fastmail, Zoho. One ~340 KB exe, ~5 MB RAM, no browser tab needed. Installer or portable exe, no admin rights either way.
 
 <!-- add screenshot.gif of the popup here -->
 
@@ -16,7 +16,7 @@ Tiny Windows tray app that pops up new mail instantly: Gmail, Outlook/Hotmail, Y
 
 ## Setup
 
-1. Download `pigeon.exe` from [Releases](../../releases) and run it.
+1. Download `pigeon-setup.exe` from [Releases](../../releases) and run it (Start menu entry, uninstall from Settings > Apps). Or take `pigeon.exe` and run it from any folder.
 2. Click **Add...** and enter your email address.
    - **Gmail, Yahoo, AOL, iCloud, Yandex, Fastmail, Zoho:** create an app password (the **Get app password...** button opens the right page; 2-step verification must be on) and paste it.
    - **Outlook, Hotmail, Live:** leave the password empty and click **Add**; sign in on the Microsoft page that opens.
