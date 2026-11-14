@@ -77,6 +77,7 @@ static int g_hover;
 static int g_corner;            /* 0 top right, 1 top left, 2 bottom right, 3 bottom left */
 static int g_fullHold = 1;      /* hold popups while a fullscreen app or game runs */
 static int g_quiet, g_quietFrom = 22 * 60, g_quietTo = 7 * 60;   /* minutes after midnight */
+static ULONGLONG g_pauseUntil;  /* tray "Pause popups": until then (NowMs), held like quiet hours; saved, so it survives a restart */
 
 /* "22:30" or "22" -> minutes after midnight; -1 if not a time */
 static int ParseHM(const char *v)
@@ -472,7 +473,7 @@ static int SaveConfig(void)
     fprintf(f, "popup=%d\r\nsound=%d\r\ncorner=%d\r\n", g_popupMs / 1000, g_sound, g_corner);
     fprintf(f, "fullhold=%d\r\nquiet=%d\r\nquietfrom=%02d:%02d\r\nquietto=%02d:%02d\r\n", g_fullHold, g_quiet,
             g_quietFrom / 60, g_quietFrom % 60, g_quietTo / 60, g_quietTo % 60);
-    fprintf(f, "vip=%s\r\nmute=%s\r\nmutecat=%d\r\n", g_vip, g_mute, g_muteCat);
+    fprintf(f, "vip=%s\r\nmute=%s\r\nmutecat=%d\r\npauseuntil=%llu\r\n", g_vip, g_mute, g_muteCat, g_pauseUntil);
     fprintf(f, "cols=%d %d %d %d %d %d %d %d\r\n", g_colOrder[0], g_colOrder[1], g_colOrder[2], g_colW[0], g_colW[1], g_colW[2], g_sortCol, g_sortDir);
     WideCharToMultiByte(CP_UTF8, 0, g_soundFile, -1, u8, sizeof u8, NULL, NULL);
     fprintf(f, "soundfile=%s\r\n", u8);
@@ -527,6 +528,7 @@ static int LoadConfig(void)
         else if (strcmp(k, "corner") == 0)   g_corner = atoi(v) & 3;
         else if (strcmp(k, "fullhold") == 0) g_fullHold = atoi(v);
         else if (strcmp(k, "quiet") == 0)    g_quiet = atoi(v);
+        else if (strcmp(k, "pauseuntil") == 0) g_pauseUntil = _strtoui64(v, NULL, 10);
         else if (strcmp(k, "cols") == 0) {
             int o[3], wd[3], sc, sd, j;
             if (sscanf_s(v, "%d %d %d %d %d %d %d %d", &o[0], &o[1], &o[2], &wd[0], &wd[1], &wd[2], &sc, &sd) == 8
@@ -2019,6 +2021,23 @@ static int Unseen(Tls *t)
     char line[2048], tag[16];
     size_t tl;
     int n = -1;
+    if (Prov(t->acc->email)->kind == 0) {   /* Gmail: Primary tab only, like Gmail's own count; on NO, STATUS below */
+        if (!Cmd(t, "SEARCH X-GM-RAW \"in:inbox is:unread category:primary\"", tag)) return 0;
+        tl = strlen(tag);
+        for (;;) {
+            int c, k = 0, cnt = 0, dig = 0;
+            for (;;) {                      /* the result line can be huge: count numbers as they stream */
+                if ((c = TlsGetc(t)) < 0) return 0;
+                if (c == '\n') break;
+                if (k < (int)sizeof line - 1) line[k++] = (char)c;
+                if (c >= '0' && c <= '9') { cnt += !dig; dig = 1; } else dig = 0;
+            }
+            line[k] = 0;
+            if (!strncmp(line, "* SEARCH", 8)) n = cnt;
+            if (strncmp(line, tag, tl) == 0 && line[tl] == ' ') break;
+        }
+    }
+    if (n < 0) {
     if (!Cmd(t, "STATUS INBOX (UNSEEN)", tag)) return 0;
     tl = strlen(tag);
     for (;;) {
@@ -2026,6 +2045,7 @@ static int Unseen(Tls *t)
         if (ReadLine(t, line, sizeof line) < 0) return 0;
         if ((u = strstr(line, "(UNSEEN ")) != NULL) n = atoi(u + 8);
         if (strncmp(line, tag, tl) == 0 && line[tl] == ' ') break;
+    }
     }
     if (n >= 0 && n != t->acc->unread) {
         t->acc->unread = n;
@@ -3155,7 +3175,7 @@ static void SnzSave(void)
     for (i = 0; i < QMAX; i++) {
         NewMail *n = g_snz[i];
         if (!n) continue;
-        fprintf(f, "%llu\t%lu\t%s\t", g_snzDue[i], n->uid, n->acc ? n->acc->email : "");
+        fprintf(f, "%llu:%llu\t%lu\t%s\t", g_snzDue[i], n->when, n->uid, n->acc ? n->acc->email : "");   /* due:received */
         PutField(f, n->from, 0);
         PutField(f, n->subj, 0);
         PutField(f, n->url, 0);
@@ -3196,7 +3216,8 @@ static void SnzLoad(void)
         if (k < 7) continue;
         if (k == 8 || !strchr(fld[7], '\n')) { char *e = strpbrk(fld[7], "\r\n"); if (e) *e = 0; }
         if (!(n = calloc(1, sizeof *n))) break;
-        g_snzDue[i] = _strtoui64(fld[0], NULL, 10);
+        g_snzDue[i] = _strtoui64(fld[0], &c, 10);
+        if (*c == ':') n->when = _strtoui64(c + 1, NULL, 10);   /* older files have no received time */
         n->uid = strtoul(fld[1], NULL, 10);
         for (a = 0; a < g_nacc; a++) if (!strcmp(g_acc[a].email, fld[2])) n->acc = &g_acc[a];
         MultiByteToWideChar(CP_UTF8, 0, fld[3], -1, n->from, 256);
@@ -3526,7 +3547,6 @@ static void UpdateBadge(void)
 
 /* ---------- Do not disturb ---------- */
 
-static ULONGLONG g_pauseUntil;  /* tray "Pause popups": until then, held like quiet hours */
 static int InQuietHours(void)
 {
     SYSTEMTIME st;
@@ -3548,6 +3568,7 @@ static int FullscreenBusy(void)
 }
 
 static NewMail *g_q[QMAX];       /* mail waiting for the popup to close */
+#define BATCH 5                  /* this many waiting: shown as one summary popup */
 static int g_qn;
 static int g_held;               /* mails that came during quiet hours */
 static char g_heldAcc[128];      /* account of the last one, for the summary's link */
@@ -3578,8 +3599,33 @@ static void ShowNext(void)
         SetTimer(g_main, TIMER_DND, 5000, NULL);
         return;
     }
-    nm = g_q[0];
-    memmove(g_q, g_q + 1, (--g_qn) * sizeof *g_q);
+    if (g_qn >= BATCH) {                /* a pile-up: one "N new mails" popup instead of a long chain */
+        int i, total = 0;
+        wchar_t who[256] = L"";
+        nm = calloc(1, sizeof *nm);
+        if (!nm) return;
+        nm->acc = g_q[0]->acc;          /* badge and inbox link: the first one's account */
+        InboxUrl(nm->acc ? nm->acc->email : "", nm->url);
+        for (i = 0; i < g_qn; i++) {
+            NewMail *q = g_q[i];
+            wchar_t *more = wcsstr(q->from, L"  +"), name[256];
+            total += 1 + (more ? _wtoi(more + 3) : 0);   /* "Anna  +2 more" is 3 mails */
+            wcsncpy_s(name, 256, q->from, more ? (size_t)(more - q->from) : _TRUNCATE);
+            if (name[0] && !wcsstr(who, name) && wcslen(who) + wcslen(name) + 2 < 256) {
+                if (who[0]) wcscat_s(who, 256, L", ");
+                wcscat_s(who, 256, name);
+            }
+            HistAdd(q);
+            free(q);
+        }
+        swprintf_s(nm->from, 256, L"%d new mails", total);
+        wcscpy_s(nm->subj, 256, who[0] ? who : L"New mail");
+        g_qn = 0;
+        nm->uid = NOMAIL;               /* nothing to act on: no button bar */
+    } else {
+        nm = g_q[0];
+        memmove(g_q, g_q + 1, (--g_qn) * sizeof *g_q);
+    }
     g_cur = *nm;
     HistAdd(nm);
     wcscpy_s(g_mailUrl, 512, nm->url);
@@ -3692,6 +3738,7 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         }
         if (LOWORD(w) == IDM_PAUSE) {
             g_pauseUntil = NowMs() < g_pauseUntil ? 0 : NowMs() + 3600000;
+            SaveConfig();
             if (!g_pauseUntil) SendMessageW(h, WM_TIMER, TIMER_QUIET, 0);   /* resumed: held summary now, not in a minute */
         }
         if (LOWORD(w) == IDM_SETTINGS) OpenSettings();
