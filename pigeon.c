@@ -1000,15 +1000,20 @@ static void DrawButtons(HWND h, HDC dc)
             }
         } else if (b == 1) {            /* archive: an envelope drops into the box */
             wchar_t box = 0xE7B8, env = 0xE715;
-            q = el < 250 ? 0 : el > 850 ? 1 : (el - 250) / 600;   /* starts while still sliding */
-            GlyphAt(dc, g_fontIcon, box, cx, cy, fg);
-            if (q > 0) {
-                int sv = SaveDC(dc);
-                IntersectClipRect(dc, r.left, r.top, r.right, (int)cy - DP(7));   /* gone once past the lid */
+            int lid = (int)cy - DP(4), sv;   /* lid of the box glyph sits above this line */
+            double la = el < 250 ? 1 : el < 400 ? 1 - (el - 250) / 150 : el < 800 ? 0 : el < 950 ? (el - 800) / 150 : 1;
+            q = el < 350 ? 0 : el > 800 ? 1 : (el - 350) / 450;   /* drops once the lid is fading */
+            sv = SaveDC(dc);
+            IntersectClipRect(dc, r.left, lid, r.right, r.bottom);
+            GlyphAt(dc, g_fontIcon, box, cx, cy, fg);   /* body */
+            RestoreDC(dc, sv);
+            sv = SaveDC(dc);
+            IntersectClipRect(dc, r.left, r.top, r.right, lid);   /* above the body: gone once inside */
+            if (q > 0)
                 GlyphAt(dc, g_fontIconS, env, cx, cy - DP(16) + DP(14) * q * q,   /* falls in from above, speeding up */
                         Mix(bg, fg, (int)(255 * (q < 0.25 ? q * 4 : 1))));
-                RestoreDC(dc, sv);
-            }
+            if (la > 0) GlyphAt(dc, g_fontIcon, box, cx, cy, Mix(bg, fg, (int)(255 * la)));   /* lid fades out, then back */
+            RestoreDC(dc, sv);
         } else if (b == 2) {            /* star: fills in from the click on */
             wchar_t solid = 0xE735, line = 0xE734;
             GlyphAt(dc, g_fontIcon, solid, cx, cy, Mix(bg, fg, (int)(255 * p)));
