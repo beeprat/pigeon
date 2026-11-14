@@ -2161,7 +2161,7 @@ static void DarkDlg(HWND d)
         int lv = _wcsicmp(cls, WC_LISTVIEWW) == 0;
         SetWindowTheme(c, _wcsicmp(cls, L"ComboBox") == 0 ? L"DarkMode_CFD" : lv ? L"DarkMode_ItemsView" : L"DarkMode_Explorer", NULL);
         if (lv || _wcsicmp(cls, L"Edit") == 0) {   /* borderless: WM_PAINT draws a rounded field behind it */
-            SetWindowLongW(c, GWL_STYLE, (GetWindowLongW(c, GWL_STYLE) & ~WS_BORDER) | (lv ? LVS_NOCOLUMNHEADER : 0));
+            SetWindowLongW(c, GWL_STYLE, GetWindowLongW(c, GWL_STYLE) & ~WS_BORDER);
             SetWindowLongW(c, GWL_EXSTYLE, GetWindowLongW(c, GWL_EXSTYLE) & ~WS_EX_CLIENTEDGE);
             SetWindowPos(c, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
         }
@@ -2169,6 +2169,7 @@ static void DarkDlg(HWND d)
             ListView_SetBkColor(c, FIELD);
             ListView_SetTextBkColor(c, FIELD);
             ListView_SetTextColor(c, INK);
+            SetWindowTheme(ListView_GetHeader(c), L"DarkMode_ItemsView", NULL);
         }
     }
 }
@@ -2431,6 +2432,36 @@ static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
     return FALSE;
 }
 
+static HWND g_sortLv;
+static int g_sortCol, g_sortDir = 1;
+
+static int CALLBACK SortCmp(LPARAM a, LPARAM b, LPARAM col)
+{
+    wchar_t x[256], y[256];
+    ListView_GetItemText(g_sortLv, (int)a, (int)col, x, 256);
+    ListView_GetItemText(g_sortLv, (int)b, (int)col, y, 256);
+    return _wcsicmp(x, y) * g_sortDir;
+}
+
+/* Header click: sort by that column; a second click flips the order. The arrow shows which. */
+static void SortList(HWND lv, int col)
+{
+    HWND hd = ListView_GetHeader(lv);
+    HDITEMW hi;
+    int i;
+    g_sortDir = col == g_sortCol ? -g_sortDir : 1;
+    g_sortCol = col;
+    g_sortLv = lv;
+    ListView_SortItemsEx(lv, SortCmp, col);
+    for (i = 0; i < Header_GetItemCount(hd); i++) {
+        hi.mask = HDI_FORMAT;
+        Header_GetItem(hd, i, &hi);
+        hi.fmt &= ~(HDF_SORTUP | HDF_SORTDOWN);
+        if (i == col) hi.fmt |= g_sortDir > 0 ? HDF_SORTUP : HDF_SORTDOWN;
+        Header_SetItem(hd, i, &hi);
+    }
+}
+
 /* Adds an account and starts watching it at once. Returns 1 if added. */
 static int AddAccount(HWND owner)
 {
@@ -2482,6 +2513,7 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         int i;
         if (init || nm->hdr.idFrom != IDC_LIST) break;
         if (nm->hdr.code == NM_DBLCLK) { SendMessageW(d, WM_COMMAND, IDC_FIX, 0); return TRUE; }
+        if (nm->hdr.code == LVN_COLUMNCLICK) { SortList(lv, nm->iSubItem); return TRUE; }
         if (nm->hdr.code != LVN_ITEMCHANGED || !(nm->uChanged & LVIF_STATE) || !((nm->uNewState ^ nm->uOldState) & LVIS_STATEIMAGEMASK)) break;
         if ((i = RowAcc(lv, nm->iItem)) < 0) break;
         g_acc[i].enabled = ListView_GetCheckState(lv, nm->iItem) ? 1 : 0;
@@ -2500,11 +2532,11 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         g_settings = d;
         init = 1;
         DarkDlg(d);
-        ListView_SetExtendedListViewStyle(lv, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT);
+        ListView_SetExtendedListViewStyle(lv, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_HEADERDRAGDROP);   /* drag headers to reorder */
         GetClientRect(lv, &rc);
         memset(&c, 0, sizeof c);
         c.mask = LVCF_TEXT | LVCF_WIDTH;
-        c.pszText = L"Account";
+        c.pszText = L"Name";
         c.cx = rc.right * 50 / 100;     /* matches the NAME/STATUS/PROVIDER labels in pigeon.rc */
         ListView_InsertColumn(lv, 0, &c);
         c.pszText = L"Status";
