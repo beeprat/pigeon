@@ -3198,7 +3198,7 @@ static void ApplySettings(HWND d)
 }
 
 #ifndef PIGEON_VERSION
-#define PIGEON_VERSION "v1.1"     /* the GitHub release tag this build is: bump it with every release */
+#define PIGEON_VERSION "v1.2"     /* the GitHub release tag this build is: bump it with every release */
 #endif
 #define IDC_UPDATE 1042
 #define UPCAP (16 << 20)
@@ -3748,7 +3748,7 @@ static void Notice(const wchar_t *subj)
 /* Logs in on a separate connection (the main one is busy in IDLE), changes one mail, logs out. */
 static DWORD WINAPI ActThread(LPVOID arg)
 {
-    static const char *store[3] = {"+FLAGS.SILENT (\\Seen)", "-X-GM-LABELS (\\Inbox)", "+FLAGS.SILENT (\\Flagged)"};
+    static const char *store[3] = {"+FLAGS.SILENT (\\Seen)", NULL /* archive moves, see below */, "+FLAGS.SILENT (\\Flagged)"};
     static const wchar_t *fail[3] = {L"Could not mark the mail as seen", L"Could not archive the mail", L"Could not star the mail"};
     Act *a = arg;
     Tls *t = calloc(1, sizeof *t);
@@ -3761,22 +3761,43 @@ static DWORD WINAPI ActThread(LPVOID arg)
         if (TlsConnect(t, Prov(a->acc.email)->host, "993") && ReadLine(t, line, sizeof line) >= 0 && strncmp(line, "* OK", 4) == 0) {
             if (Login(t, 0) == 1 &&
                 Cmd(t, "SELECT INBOX", tag) && WaitOk(t, tag, NULL) == 1) {
-                if (a->act == 1 && Prov(a->acc.email)->kind != 0) {   /* no Gmail labels: move to the folder marked \Archive */
-                    char box[256] = "Archive";
+                if (a->act == 1) {              /* archive: move to the folder marked \Archive, or for Gmail \All (All Mail) */
+                    int gm = Prov(a->acc.email)->kind == 0;   /* Gmail ignores removing the Inbox label while INBOX is selected */
+                    char set[300], box[256], thr[32] = "", *p;
                     size_t tl;
-                    if (Cmd(t, "LIST (SPECIAL-USE) \"\" \"*\"", tag)) {
+                    sprintf_s(set, sizeof set, "%lu", a->uid);
+                    strcpy_s(box, sizeof box, gm ? "[Gmail]/All Mail" : "Archive");
+                    if (gm) {                   /* the whole conversation, like Gmail's Archive; else the thread stays in the inbox */
+                        sprintf_s(cmd, sizeof cmd, "UID FETCH %lu (X-GM-THRID)", a->uid);
+                        if (Cmd(t, cmd, tag)) {
+                            tl = strlen(tag);
+                            while (ReadLine(t, line, sizeof line) >= 0 && !(strncmp(line, tag, tl) == 0 && line[tl] == ' '))
+                                if ((p = strstr(line, "X-GM-THRID ")) != NULL) sprintf_s(thr, sizeof thr, "%.20s", p + 11);
+                        }
+                        thr[strspn(thr, "0123456789")] = 0;
+                        sprintf_s(cmd, sizeof cmd, "UID SEARCH X-GM-THRID %s", thr);
+                        if (thr[0] && Cmd(t, cmd, tag)) {
+                            tl = strlen(tag);
+                            while (ReadLine(t, line, sizeof line) >= 0 && !(strncmp(line, tag, tl) == 0 && line[tl] == ' '))
+                                if (strncmp(line, "* SEARCH ", 9) == 0 && strspn(line + 9, "0123456789 ") == strlen(line + 9) && strlen(line + 9) < sizeof set) {
+                                    strcpy_s(set, sizeof set, line + 9);   /* shortcut: a thread too long for 300 chars archives just this mail */
+                                    for (p = set; *p; p++) if (*p == ' ') *p = ',';
+                                }
+                        }
+                    }
+                    if (Cmd(t, "LIST (SPECIAL-USE) \"\" \"*\"", tag)) {   /* the folder's real name: Gmail's is translated */
                         tl = strlen(tag);
                         while (ReadLine(t, line, sizeof line) >= 0 && !(strncmp(line, tag, tl) == 0 && line[tl] == ' ')) {
                             char *q;
-                            if (!strstr(line, "\\Archive")) continue;
+                            if (!strstr(line, gm ? "\\All" : "\\Archive")) continue;
                             q = line + strlen(line);
-                            while (q > line && (q[-1] == '"' || q[-1] == ' ')) *--q = 0;
-                            while (q > line && q[-1] != ' ' && q[-1] != '"') q--;
+                            while (q > line && q[-1] == ' ') *--q = 0;
+                            if (q > line && q[-1] == '"') { *--q = 0; while (q > line && q[-1] != '"') q--; }   /* quoted: may hold spaces */
+                            else while (q > line && q[-1] != ' ') q--;
                             if (*q) strcpy_s(box, sizeof box, q);
                         }
                     }
-                    strcpy_s(cmd, sizeof cmd, "UID MOVE ");
-                    sprintf_s(cmd + strlen(cmd), sizeof cmd - strlen(cmd), "%lu ", a->uid);
+                    sprintf_s(cmd, sizeof cmd, "UID MOVE %s ", set);
                     QuoteTo(cmd, sizeof cmd, box);
                 } else sprintf_s(cmd, sizeof cmd, "UID STORE %lu %s", a->uid, store[a->act]);
                 ok = Cmd(t, cmd, tag) && WaitOk(t, tag, NULL) == 1;
