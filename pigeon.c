@@ -2273,8 +2273,8 @@ static LRESULT DrawHdr(NMCUSTOMDRAW *cd)
     Header_GetItem(cd->hdr.hwndFrom, (int)cd->dwItemSpec, &hi);
     FillRect(dc, &r, g_fieldBrush);
     op = SelectObject(dc, pen);
-    MoveToEx(dc, r.right - 1, r.top + DP(4), NULL);
-    LineTo(dc, r.right - 1, r.bottom - DP(4));
+    MoveToEx(dc, r.right - 2, r.top + DP(4), NULL);   /* -2: lines up with the list's own column lines */
+    LineTo(dc, r.right - 2, r.bottom - DP(4));
     SelectObject(dc, op);
     DeleteObject(pen);
     SetBkMode(dc, TRANSPARENT);
