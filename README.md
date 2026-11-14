@@ -8,7 +8,7 @@ Tiny Windows tray app that pops up new mail instantly: Gmail, Outlook/Hotmail, Y
 
 - Instant push via IMAP IDLE, several accounts
 - Popup with sender, subject and preview; archive, star, snooze, open
-- Keys while hovering: `E` archive, `S` star, `Z` snooze (`1`–`4` pick time), `Esc` close
+- Keys while hovering: `R` mark as read, `A` or `E` archive, `S` star, `Z` snooze (`1`–`4` pick time), `Esc` close
 - Tray badge with unread count, "Recent" history menu
 - Do-not-disturb: holds popups during fullscreen apps and quiet hours, then shows a summary
 - Sender filters: VIP list, mute list, hide Promotions/Social (Gmail)
