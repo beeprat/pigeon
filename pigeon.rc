@@ -50,7 +50,8 @@ BEGIN
     EDITTEXT        1006, 14, 345, 182, 13, ES_AUTOHSCROLL
     PUSHBUTTON      "Browse...", 1007, 206, 343, 54, 15
 
-    PUSHBUTTON      "Test popup", 1008, 4, 370, 60, 16
+    PUSHBUTTON      "Test popup", 1008, 88, 370, 60, 16
+    PUSHBUTTON      "Check for updates", 1042, 4, 370, 80, 16
     PUSHBUTTON      "Close", IDCANCEL, 208, 370, 60, 16
 END
 

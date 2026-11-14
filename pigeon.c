@@ -21,6 +21,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <winhttp.h>
+#include <bcrypt.h>
 #include <uxtheme.h>
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -34,6 +35,7 @@
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "winhttp.lib")
+#pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "uxtheme.lib")
 
 #define TIMER_HIDE 2
@@ -2895,6 +2897,138 @@ static void ApplySettings(HWND d)
     g_muteCat = IsDlgButtonChecked(d, IDC_MUTECAT) == BST_CHECKED;
 }
 
+#ifndef PIGEON_VERSION
+#define PIGEON_VERSION "v1.0"     /* the GitHub release tag this build is: bump it with every release */
+#endif
+#define IDC_UPDATE 1042
+#define UPCAP (16 << 20)
+
+/* GET an https URL into out; follows GitHub's redirect to its download host. -1 on error, non-200 or too big. */
+static int HttpGet(const char *url, char *out, int cap)
+{
+    wchar_t w[2048], host[256], path[2048];
+    URL_COMPONENTS u;
+    HINTERNET s, c = NULL, r = NULL;
+    DWORD got = 0, st = 0, sl = sizeof st;
+    int len = -1;
+    memset(&u, 0, sizeof u);
+    u.dwStructSize = sizeof u;
+    u.lpszHostName = host; u.dwHostNameLength = 256;
+    u.lpszUrlPath = path;  u.dwUrlPathLength = 2048;
+    MultiByteToWideChar(CP_UTF8, 0, url, -1, w, 2048);
+    if (!WinHttpCrackUrl(w, 0, 0, &u) || u.nScheme != INTERNET_SCHEME_HTTPS) return -1;
+    s = WinHttpOpen(L"pigeon", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!s) return -1;
+    WinHttpSetTimeouts(s, 15000, 15000, 15000, 30000);
+    c = WinHttpConnect(s, host, u.nPort, 0);
+    if (c) r = WinHttpOpenRequest(c, L"GET", path, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (r && WinHttpSendRequest(r, WINHTTP_NO_ADDITIONAL_HEADERS, 0, NULL, 0, 0, 0) && WinHttpReceiveResponse(r, NULL)
+          && WinHttpQueryHeaders(r, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &st, &sl, NULL) && st == 200) {
+        len = 0;
+        while (len < cap - 1 && WinHttpReadData(r, out + len, cap - 1 - len, &got) && got) len += got;
+        out[len] = 0;
+        if (len == cap - 1) len = -1;   /* cut off: never install half a file */
+    }
+    if (r) WinHttpCloseHandle(r);
+    if (c) WinHttpCloseHandle(c);
+    WinHttpCloseHandle(s);
+    return len;
+}
+
+/* Next string value after "key" in GitHub's JSON whose text ends with suf. */
+static int JsonStr(const char *j, const char *key, const char *suf, char *out, int cap)
+{
+    char k[64];
+    const char *p = j, *v, *e;
+    sprintf_s(k, sizeof k, "\"%s\"", key);
+    while ((p = strstr(p, k)) != NULL) {
+        p += strlen(k);
+        while (*p == ' ' || *p == ':') p++;
+        if (*p++ != '"' || !(e = strchr(p, '"'))) continue;
+        v = p; p = e;
+        if ((int)(e - v) >= cap || (int)(e - v) < (int)strlen(suf) || strncmp(e - strlen(suf), suf, strlen(suf))) continue;
+        memcpy(out, v, e - v); out[e - v] = 0;
+        return 1;
+    }
+    return 0;
+}
+
+static void SelfPath(wchar_t *p, const wchar_t *ext)   /* this exe's path, plus ext (L"" for none) */
+{
+    GetModuleFileNameW(NULL, p, MAX_PATH);
+    wcscat_s(p, MAX_PATH, ext);
+}
+
+/* Settings "Check for updates": newest GitHub release, checked against its .sha256, swapped in for this exe,
+   restarted. Config lives in %APPDATA%, so nothing to carry over. */
+static void Update(HWND d)
+{
+    char *buf = malloc(UPCAP), tag[64], exe[1024], sumUrl[1024], want[65], got[65];
+    wchar_t me[MAX_PATH], nw[MAX_PATH], old[MAX_PATH], msg[256];
+    UCHAR dig[32];
+    int n, i;
+    HANDLE f;
+    DWORD wr;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    HCURSOR cur = SetCursor(LoadCursorW(NULL, IDC_WAIT));
+    if (!buf) return;
+    if (HttpGet("https://api.github.com/repos/beeprat/pigeon/releases/latest", buf, UPCAP) <= 0
+          || !JsonStr(buf, "tag_name", "", tag, sizeof tag)) {
+        SetCursor(cur); free(buf);
+        MessageBoxW(d, L"Couldn't reach GitHub. Try again later.", L"pigeon", MB_ICONWARNING);
+        return;
+    }
+    SetCursor(cur);
+    if (!strcmp(tag, PIGEON_VERSION)) {
+        free(buf);
+        MessageBoxW(d, L"pigeon is up to date (" TEXT(PIGEON_VERSION) L").", L"pigeon", MB_ICONINFORMATION);
+        return;
+    }
+    if (!JsonStr(buf, "browser_download_url", ".exe", exe, sizeof exe) || !JsonStr(buf, "browser_download_url", ".exe.sha256", sumUrl, sizeof sumUrl)) {
+        free(buf);
+        MessageBoxW(d, L"The new release has no download yet. Try again later.", L"pigeon", MB_ICONWARNING);
+        return;
+    }
+    swprintf_s(msg, 256, L"pigeon %hs is out (you have " TEXT(PIGEON_VERSION) L").\n\nDownload it and restart? Your settings and accounts are kept.", tag);
+    if (MessageBoxW(d, msg, L"pigeon update", MB_YESNO | MB_ICONQUESTION) != IDYES) { free(buf); return; }
+    SetCursor(LoadCursorW(NULL, IDC_WAIT));
+    if (HttpGet(sumUrl, buf, UPCAP) < 64) n = -1;
+    else {
+        for (i = 0; i < 64; i++) want[i] = (char)tolower((unsigned char)buf[i]);
+        want[64] = 0;
+        n = HttpGet(exe, buf, UPCAP);
+    }
+    if (n > 0 && BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, (PUCHAR)buf, n, dig, 32) == 0)
+        for (i = 0; i < 32; i++) sprintf_s(got + i * 2, 3, "%02x", dig[i]);
+    else got[0] = 0;
+    SetCursor(cur);
+    if (n <= 0 || strcmp(got, want)) {   /* download failed or doesn't match its checksum: keep this exe */
+        free(buf);
+        MessageBoxW(d, L"The download failed or didn't check out. Nothing was changed.", L"pigeon", MB_ICONWARNING);
+        return;
+    }
+    SelfPath(me, L""); SelfPath(nw, L".new"); SelfPath(old, L".old");
+    f = CreateFileW(nw, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    i = f != INVALID_HANDLE_VALUE && WriteFile(f, buf, n, &wr, NULL) && wr == (DWORD)n;
+    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+    free(buf);
+    /* a running exe can't be overwritten but can be renamed: move it aside, put the new one in its place */
+    if (!i || !MoveFileExW(me, old, MOVEFILE_REPLACE_EXISTING)) { DeleteFileW(nw); i = 0; }
+    else if (!MoveFileExW(nw, me, 0)) { MoveFileExW(old, me, 0); DeleteFileW(nw); i = 0; }
+    if (!i) {
+        MessageBoxW(d, L"Couldn't replace pigeon.exe (is its folder read-only?). Nothing was changed.", L"pigeon", MB_ICONWARNING);
+        return;
+    }
+    SendMessageW(d, WM_COMMAND, IDCANCEL, 0);   /* close Settings the usual way: saves */
+    SaveConfig();
+    CloseHandle(g_mutex); g_mutex = NULL;       /* let the new one start */
+    memset(&si, 0, sizeof si); si.cb = sizeof si;
+    swprintf_s(nw, MAX_PATH, L"\"%s\" /after %lu", me, GetCurrentProcessId());   /* it waits for us to exit */
+    if (CreateProcessW(me, nw, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) { CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
+    PostMessageW(g_main, WM_COMMAND, IDM_EXIT, 0);
+}
+
 static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
 {
     HWND lv = GetDlgItem(d, IDC_LIST);
@@ -3118,6 +3252,9 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
             wcscpy_s(g_soundFile, MAX_PATH, keepFile);
             break;
         }
+        case IDC_UPDATE:
+            Update(d);
+            return TRUE;
         case IDCANCEL:                  /* Close, Esc and the X: write it all down */
             ApplySettings(d);
             AutoStartSet(IsDlgButtonChecked(d, IDC_AUTOSTART) == BST_CHECKED);
@@ -3797,9 +3934,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
     INITCOMMONCONTROLSEX icc;
     int configured;
 
+    if (wcsstr(cmd, L"/after ")) {      /* started by an update: let the old one finish quitting */
+        HANDLE old = OpenProcess(SYNCHRONIZE, FALSE, wcstoul(wcsstr(cmd, L"/after ") + 7, NULL, 10));
+        if (old) { WaitForSingleObject(old, 10000); CloseHandle(old); }
+    }
     g_mutex = CreateMutexW(NULL, FALSE, L"pigeon-singleton");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;   /* already running */
     g_inst = hInst;
+    {
+        wchar_t old[MAX_PATH];
+        SelfPath(old, L".old");
+        DeleteFileW(old);               /* left behind by an update */
+    }
     icc.dwSize = sizeof icc;
     icc.dwICC = ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES | ICC_BAR_CLASSES;   /* BAR: tooltips */
     InitCommonControlsEx(&icc);
