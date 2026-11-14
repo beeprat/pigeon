@@ -1110,7 +1110,7 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         int b = BtnAt(h, (short)LOWORD(l), (short)HIWORD(l) - VisTop());
         POINT pt = {(short)LOWORD(l), (short)HIWORD(l) - VisTop()};
         int sh = PtInRect(&g_subjRect, pt);
-        if (b != g_hot || sh != g_subjHot) { g_hot = b; g_subjHot = sh; BtnTip(h, -1); if (b >= 0) SetTimer(h, TIMER_TIP, 2000, NULL); else KillTimer(h, TIMER_TIP); InvalidateRect(h, NULL, FALSE); }
+        if (b != g_hot || sh != g_subjHot) { g_hot = b; g_subjHot = sh; BtnTip(h, -1); if (b >= 0) SetTimer(h, TIMER_TIP, 1000, NULL); else KillTimer(h, TIMER_TIP); InvalidateRect(h, NULL, FALSE); }
         if (!g_hover) {                         /* hold the popup while the mouse is on it */
             TRACKMOUSEEVENT te;
             te.cbSize = sizeof te;
@@ -3211,7 +3211,7 @@ static void PopupAction(int b)
     } else if (b == 3) {                /* bar turns into the snooze times; leaving the popup turns it back */
         g_snzMode = 1;
         BtnTip(g_popup, -1);
-        SetTimer(g_popup, TIMER_TIP, 2000, NULL);
+        SetTimer(g_popup, TIMER_TIP, 1000, NULL);
         InvalidateRect(g_popup, NULL, FALSE);
         return;
     } else if (g_cur.acc && g_cur.uid) {
