@@ -1,3 +1,5 @@
+<img src="logo.png" width="96" alt="pigeon logo" align="right">
+
 # pigeon
 
 Tiny Windows tray app that pops up new mail instantly: Gmail, Outlook/Hotmail, Yahoo, AOL, iCloud, GMX, Web.de, Yandex, Fastmail, Zoho. One ~340 KB exe, ~5 MB RAM, no browser tab needed. Installer or portable exe, no admin rights either way.
