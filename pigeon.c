@@ -351,7 +351,7 @@ static int XoauthB64(const char *email, const char *tok, char *out, DWORD cap)
 /* Device-code sign-in from the Add dialog. Stores the refresh token sealed in a->pass. */
 static int MsSignIn(HWND d, Account *a)
 {
-    char body[1024], *resp = malloc(32768), code[32], dev[2048], uri[256], rt[PASSMAX];
+    char body[8192], *resp = malloc(32768), code[32], dev[4096], uri[256], rt[PASSMAX];
     wchar_t msg[512];
     int ok = 0;
     if (!resp) return 0;
@@ -391,7 +391,10 @@ static int MsSignIn(HWND d, Account *a)
             break;
         }
         if (!strstr(resp, "authorization_pending")) {
-            MessageBoxW(d, L"Sign-in was declined or expired. Click Add to try again.", L"pigeon", MB_ICONWARNING);
+            char why[400];
+            if (!JStr(resp, "error_description", why, sizeof why)) strcpy_s(why, sizeof why, resp[0] ? "no refresh token in reply" : "no reply");
+            swprintf_s(msg, 512, L"Microsoft sign-in failed:\n\n%.380hs", why);
+            MessageBoxW(d, msg, L"pigeon", MB_ICONWARNING);
             break;
         }
         swprintf_s(msg, 512, L"Not finished yet. Enter code %hs on the Microsoft page, sign in, then click OK.", code);
@@ -607,8 +610,9 @@ static void DrawLogo(HDC dc, int x, int y, int w, int h)
 
 static HFONT MakeFont(int h, int weight);
 
-/* Gmail-style letter avatar: colored circle with the sender's initial, small Gmail logo bottom right */
-static void DrawAvatar(HDC dc, int x, int y, int d, const wchar_t *name)
+/* Gmail-style letter avatar: colored circle with the sender's initial, small provider badge bottom right
+   (kind: Gmail logo for 0, blue "O" for Microsoft, none otherwise) */
+static void DrawAvatar(HDC dc, int x, int y, int d, const wchar_t *name, int kind)
 {
     static const COLORREF pal[] = {RGB(66,133,244), RGB(219,68,55), RGB(244,160,0), RGB(15,157,88),
                                    RGB(171,71,188), RGB(0,172,193), RGB(255,112,67), RGB(92,107,192)};
@@ -641,7 +645,25 @@ static void DrawAvatar(HDC dc, int x, int y, int d, const wchar_t *name)
     DrawTextW(m, ch, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     SelectObject(m, of);
     DeleteObject(f);
-    {   /* small Gmail logo bottom right, drawn over the circle with a BG-colored outline */
+    if (kind == 2) {   /* Outlook: blue rounded square with a white O, BG-colored outline */
+        int ow = DP(3) * S, lw = DP(BADGE - 2) * S, ox = D + E - lw - ow / 2, oy = D - lw - ow / 2;
+        RECT br = {ox, oy, ox + lw, oy + lw};
+        HPEN pen = CreatePen(PS_SOLID, ow * 2, BG);
+        b = CreateSolidBrush(RGB(0, 120, 212));
+        SelectObject(m, pen);
+        SelectObject(m, b);
+        RoundRect(m, br.left, br.top, br.right, br.bottom, lw / 3, lw / 3);
+        SelectObject(m, GetStockObject(NULL_PEN));
+        RoundRect(m, br.left, br.top, br.right + 1, br.bottom + 1, lw / 3, lw / 3);
+        SelectObject(m, GetStockObject(NULL_BRUSH));
+        DeleteObject(b);
+        DeleteObject(pen);
+        f = MakeFont(-lw * 70 / 100, FW_BOLD);
+        of = SelectObject(m, f);
+        DrawTextW(m, L"O", 1, &br, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(m, of);
+        DeleteObject(f);
+    } else if (kind == 0) {   /* small Gmail logo bottom right, drawn over the circle with a BG-colored outline */
         static const POINT src[5][8] = {
             {{0,10},{10,10},{10,33},{0,33}},
             {{34,10},{44,10},{44,33},{34,33}},
@@ -925,7 +947,7 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         {
             int pad = DP(PAD), av = DP(AV), ch = g_ph;
             int tb = g_h1 + g_h2 + (g_to[0] ? g_h3 : 0) + (g_prev[0] ? g_h3 : 0), ty = (ch - tb) / 2;
-            DrawAvatar(dc, pad, (ch - av) / 2, av, g_text);
+            DrawAvatar(dc, pad, (ch - av) / 2, av, g_text, g_cur.acc ? Prov(g_cur.acc->email)->kind : 0);
             SetBkMode(dc, TRANSPARENT);
             tr.left = pad + av + DP(GAP); tr.right = rc.right - pad;
             of = SelectObject(dc, g_font);
