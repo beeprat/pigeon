@@ -2062,6 +2062,19 @@ static void ListAdd(HWND lv, int i)
     it.lParam = i;
     it.iItem = ListView_InsertItem(lv, &it);
     ListView_SetCheckState(lv, it.iItem, g_acc[i].enabled);
+    {
+        const Provider *pv = Prov(g_acc[i].email);
+        const char *at = strrchr(g_acc[i].email, '@');
+        size_t n;
+        if (pv->kind == 2) wcscpy_s(w, 256, L"Outlook");
+        else if (pv->kind == 0) wcscpy_s(w, 256, at && (_stricmp(at, "@gmail.com") == 0 || _stricmp(at, "@googlemail.com") == 0) ? L"Gmail" : L"Workspace");
+        else {                          /* "yahoo.*" -> Yahoo */
+            n = strcspn(pv->dom, ".");
+            swprintf_s(w, 256, L"%.*hs", (int)n, pv->dom);
+            w[0] = towupper(w[0]);
+        }
+        ListView_SetItemText(lv, it.iItem, 2, w);
+    }
 }
 
 #define RUN_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
@@ -2492,11 +2505,14 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         memset(&c, 0, sizeof c);
         c.mask = LVCF_TEXT | LVCF_WIDTH;
         c.pszText = L"Account";
-        c.cx = rc.right * 64 / 100;
+        c.cx = rc.right * 50 / 100;     /* matches the NAME/STATUS/PROVIDER labels in pigeon.rc */
         ListView_InsertColumn(lv, 0, &c);
         c.pszText = L"Status";
-        c.cx = rc.right - c.cx - GetSystemMetrics(SM_CXVSCROLL);
+        c.cx = rc.right * 27 / 100;
         ListView_InsertColumn(lv, 1, &c);
+        c.pszText = L"Provider";
+        c.cx = rc.right * 23 / 100 - GetSystemMetrics(SM_CXVSCROLL);
+        ListView_InsertColumn(lv, 2, &c);
         for (i = 0; i < g_nacc; i++) if (!g_acc[i].removed) ListAdd(lv, i);
         ListStatus(lv);
         SetDlgItemInt(d, IDC_POPUP, g_popupMs / 1000, FALSE);
