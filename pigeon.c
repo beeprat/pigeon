@@ -216,34 +216,33 @@ typedef struct {
     const char *dom, *host, *web, *help;
     int kind;
     const wchar_t *name;        /* shown in Settings' Provider column */
-    COLORREF badge;             /* popup avatar's corner logo: rounded square in this color... */
-    const wchar_t *mark;        /* ...with this text; "" = Gmail's own logo, "~" = a cloud; badge CLR_NONE = bare text */
+    const wchar_t *mark;        /* popup avatar's corner logo: this text in ink color; "" = Gmail's own logo, "~" = a cloud */
     COLORREF ink;
 } Provider;
 static const Provider g_prov[] = {
-    {"gmail.com",      "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0, L"Gmail", 0, L"", 0},
-    {"googlemail.com", "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0, L"Gmail", 0, L"", 0},
-    {"yahoo.*",        "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", CLR_NONE, L"Y!", RGB(96, 1, 210)},
-    {"ymail.com",      "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", CLR_NONE, L"Y!", RGB(96, 1, 210)},
-    {"rocketmail.com", "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", CLR_NONE, L"Y!", RGB(96, 1, 210)},
-    {"aol.com",        "imap.aol.com",         "https://mail.aol.com/", "https://login.aol.com/account/security/app-passwords", 1, L"AOL", RGB(51, 102, 255), L"Aol", RGB(255, 255, 255)},
-    {"icloud.com",     "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1, L"iCloud", RGB(0, 122, 255), L"~", RGB(255, 255, 255)},
-    {"me.com",         "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1, L"iCloud", RGB(0, 122, 255), L"~", RGB(255, 255, 255)},
-    {"mac.com",        "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1, L"iCloud", RGB(0, 122, 255), L"~", RGB(255, 255, 255)},
-    {"zoho.com",       "imap.zoho.com",        "https://mail.zoho.com/", "https://accounts.zoho.com/home#security/app_password", 1, L"Zoho", RGB(226, 34, 40), L"Z", RGB(255, 255, 255)},
-    {"zohomail.com",   "imap.zoho.com",        "https://mail.zoho.com/", "https://accounts.zoho.com/home#security/app_password", 1, L"Zoho", RGB(226, 34, 40), L"Z", RGB(255, 255, 255)},
-    {"gmx.com",        "imap.gmx.com",         "https://www.gmx.com/", "https://www.gmx.com/", 1, L"GMX", RGB(28, 68, 155), L"GMX", RGB(255, 255, 255)},
-    {"gmx.us",         "imap.gmx.com",         "https://www.gmx.com/", "https://www.gmx.com/", 1, L"GMX", RGB(28, 68, 155), L"GMX", RGB(255, 255, 255)},
-    {"gmx.*",          "imap.gmx.net",         "https://www.gmx.net/", "https://www.gmx.net/", 1, L"GMX", RGB(28, 68, 155), L"GMX", RGB(255, 255, 255)},
-    {"web.de",         "imap.web.de",          "https://web.de/", "https://web.de/", 1, L"WEB.DE", RGB(255, 213, 0), L"W", RGB(0, 0, 0)},
-    {"yandex.*",       "imap.yandex.com",      "https://mail.yandex.com/", "https://id.yandex.com/security/app-passwords", 1, L"Yandex", RGB(252, 63, 29), L"\x042f", RGB(255, 255, 255)},
-    {"ya.ru",          "imap.yandex.com",      "https://mail.yandex.com/", "https://id.yandex.com/security/app-passwords", 1, L"Yandex", RGB(252, 63, 29), L"\x042f", RGB(255, 255, 255)},
-    {"fastmail.com",   "imap.fastmail.com",    "https://app.fastmail.com/", "https://app.fastmail.com/settings/security/apps", 1, L"Fastmail", RGB(0, 103, 185), L"F", RGB(255, 255, 255)},
-    {"fastmail.fm",    "imap.fastmail.com",    "https://app.fastmail.com/", "https://app.fastmail.com/settings/security/apps", 1, L"Fastmail", RGB(0, 103, 185), L"F", RGB(255, 255, 255)},
-    {"outlook.*",      "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", RGB(0, 120, 212), L"O", RGB(255, 255, 255)},
-    {"hotmail.*",      "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", RGB(0, 120, 212), L"O", RGB(255, 255, 255)},
-    {"live.*",         "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", RGB(0, 120, 212), L"O", RGB(255, 255, 255)},
-    {"msn.com",        "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", RGB(0, 120, 212), L"O", RGB(255, 255, 255)},
+    {"gmail.com",      "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0, L"Gmail", L"", 0},
+    {"googlemail.com", "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0, L"Gmail", L"", 0},
+    {"yahoo.*",        "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", L"Y!", RGB(96, 1, 210)},
+    {"ymail.com",      "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", L"Y!", RGB(96, 1, 210)},
+    {"rocketmail.com", "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", L"Y!", RGB(96, 1, 210)},
+    {"aol.com",        "imap.aol.com",         "https://mail.aol.com/", "https://login.aol.com/account/security/app-passwords", 1, L"AOL", L"Aol", RGB(51, 102, 255)},
+    {"icloud.com",     "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1, L"iCloud", L"~", RGB(0, 122, 255)},
+    {"me.com",         "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1, L"iCloud", L"~", RGB(0, 122, 255)},
+    {"mac.com",        "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1, L"iCloud", L"~", RGB(0, 122, 255)},
+    {"zoho.com",       "imap.zoho.com",        "https://mail.zoho.com/", "https://accounts.zoho.com/home#security/app_password", 1, L"Zoho", L"Z", RGB(226, 34, 40)},
+    {"zohomail.com",   "imap.zoho.com",        "https://mail.zoho.com/", "https://accounts.zoho.com/home#security/app_password", 1, L"Zoho", L"Z", RGB(226, 34, 40)},
+    {"gmx.com",        "imap.gmx.com",         "https://www.gmx.com/", "https://www.gmx.com/", 1, L"GMX", L"GMX", RGB(28, 68, 155)},
+    {"gmx.us",         "imap.gmx.com",         "https://www.gmx.com/", "https://www.gmx.com/", 1, L"GMX", L"GMX", RGB(28, 68, 155)},
+    {"gmx.*",          "imap.gmx.net",         "https://www.gmx.net/", "https://www.gmx.net/", 1, L"GMX", L"GMX", RGB(28, 68, 155)},
+    {"web.de",         "imap.web.de",          "https://web.de/", "https://web.de/", 1, L"WEB.DE", L"W", RGB(235, 185, 0)},
+    {"yandex.*",       "imap.yandex.com",      "https://mail.yandex.com/", "https://id.yandex.com/security/app-passwords", 1, L"Yandex", L"\x042f", RGB(252, 63, 29)},
+    {"ya.ru",          "imap.yandex.com",      "https://mail.yandex.com/", "https://id.yandex.com/security/app-passwords", 1, L"Yandex", L"\x042f", RGB(252, 63, 29)},
+    {"fastmail.com",   "imap.fastmail.com",    "https://app.fastmail.com/", "https://app.fastmail.com/settings/security/apps", 1, L"Fastmail", L"F", RGB(0, 103, 185)},
+    {"fastmail.fm",    "imap.fastmail.com",    "https://app.fastmail.com/", "https://app.fastmail.com/settings/security/apps", 1, L"Fastmail", L"F", RGB(0, 103, 185)},
+    {"outlook.*",      "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", L"O", RGB(0, 120, 212)},
+    {"hotmail.*",      "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", L"O", RGB(0, 120, 212)},
+    {"live.*",         "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", L"O", RGB(0, 120, 212)},
+    {"msn.com",        "outlook.office365.com", "https://outlook.live.com/mail/0/inbox", "", 2, L"Outlook", L"O", RGB(0, 120, 212)},
 };
 
 /* Provider by the address's domain. "x.*" matches any ending. Unknown domains are Gmail: Google Workspace uses custom domains. */
@@ -727,51 +726,34 @@ static void DrawAvatar(HDC dc, int x, int y, int d, const wchar_t *name, const P
     DrawTextW(m, ch, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     SelectObject(m, of);
     DeleteObject(f);
-    if (pv->mark[0]) {   /* rounded square in the provider's color with its mark, BG-colored outline */
-        int ow = DP(3) * S, lw = DP(BADGE - 2) * S, ox = D + E - lw - ow / 2, oy = D - lw - ow / 2;
+    if (pv->mark[0]) {   /* provider's mark in its color, BG-colored outline like the Gmail logo */
+        int ow = DP(3) * S, lw = DP(BADGE - 2) * S, ox = D + E - lw - ow / 2, oy = D - lw - ow / 2, pass;
+        int len = (int)wcslen(pv->mark), u = lw / 10, cx = ox + lw / 2, cy = oy + lw / 2 + 3 * u / 2;   /* cloud spans cy-5u..cy+2u */
         RECT br = {ox, oy, ox + lw, oy + lw};
-        HPEN pen = CreatePen(PS_SOLID, ow * 2, BG);
-        b = CreateSolidBrush(pv->badge);
-        SelectObject(m, pen);
-        SelectObject(m, b);
-        if (pv->badge != CLR_NONE) {
-            RoundRect(m, br.left, br.top, br.right, br.bottom, lw / 3, lw / 3);
-            SelectObject(m, GetStockObject(NULL_PEN));
-            RoundRect(m, br.left, br.top, br.right + 1, br.bottom + 1, lw / 3, lw / 3);
+        LOGBRUSH lb = {BS_SOLID, BG, 0};
+        HPEN pen = ExtCreatePen(PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_ROUND | PS_JOIN_ROUND, ow * 2, &lb, 0, NULL);
+        b = CreateSolidBrush(pv->ink);
+        f = MakeFont(-lw * (len == 1 ? 95 : len == 2 ? 85 : 55) / 100, FW_BOLD);   /* longer marks smaller so they fit */
+        of = SelectObject(m, f);
+        SetPolyFillMode(m, WINDING);           /* overlapping cloud parts fill as one */
+        for (pass = 0; pass < 2; pass++) {     /* pass 0: thick outline, pass 1: fill */
+            BeginPath(m);
+            if (wcscmp(pv->mark, L"~") == 0) {
+                Ellipse(m, cx - 5 * u, cy - 2 * u, cx - u, cy + 2 * u + 1);
+                Ellipse(m, cx - 3 * u, cy - 5 * u, cx + 3 * u, cy + u);
+                Ellipse(m, cx + u, cy - 3 * u, cx + 5 * u, cy + 2 * u + 1);
+                Rectangle(m, cx - 3 * u, cy - u, cx + 3 * u, cy + 2 * u + 1);
+            } else DrawTextW(m, pv->mark, -1, &br, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            EndPath(m);
+            if (pass == 0) { SelectObject(m, pen); StrokePath(m); }
+            else { SelectObject(m, b); FillPath(m); }
         }
+        SelectObject(m, GetStockObject(NULL_PEN));
         SelectObject(m, GetStockObject(NULL_BRUSH));
+        SelectObject(m, of);
+        DeleteObject(f);
         DeleteObject(b);
         DeleteObject(pen);
-        if (wcscmp(pv->mark, L"~") == 0) {   /* cloud: three bumps on a flat base */
-            int u = lw / 12, cx = br.left + lw / 2, cy = br.top + lw / 2 + 3 * u / 2;   /* shape spans cy-5u..cy+2u: centered */
-            b = CreateSolidBrush(pv->ink);
-            SelectObject(m, b);
-            Ellipse(m, cx - 5 * u, cy - 2 * u, cx - u, cy + 2 * u + 1);
-            Ellipse(m, cx - 3 * u, cy - 5 * u, cx + 3 * u, cy + u);
-            Ellipse(m, cx + u, cy - 3 * u, cx + 5 * u, cy + 2 * u + 1);
-            Rectangle(m, cx - 3 * u, cy - u, cx + 3 * u, cy + 2 * u + 1);
-            SelectObject(m, GetStockObject(NULL_BRUSH));
-            DeleteObject(b);
-        } else {
-            int len = (int)wcslen(pv->mark);   /* longer marks get a smaller font so they fit */
-            f = MakeFont(-lw * (pv->badge == CLR_NONE ? 85 : len == 1 ? 70 : len == 2 ? 55 : 38) / 100, FW_BOLD);
-            of = SelectObject(m, f);
-            if (pv->badge == CLR_NONE) {       /* bare text: BG-colored outline like the Gmail logo */
-                int dx, dy;
-                SetTextColor(m, BG);
-                for (dx = -ow; dx <= ow; dx += ow / 4)     /* stamp a filled disc of offsets */
-                    for (dy = -ow; dy <= ow; dy += ow / 4) {
-                        RECT o = br;
-                        if (dx * dx + dy * dy > ow * ow) continue;
-                        OffsetRect(&o, dx, dy);
-                        DrawTextW(m, pv->mark, -1, &o, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-                    }
-            }
-            SetTextColor(m, pv->ink);
-            DrawTextW(m, pv->mark, -1, &br, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-            SelectObject(m, of);
-            DeleteObject(f);
-        }
     } else {   /* small Gmail logo bottom right, drawn over the circle with a BG-colored outline */
         static const POINT src[5][8] = {
             {{0,10},{10,10},{10,33},{0,33}},
