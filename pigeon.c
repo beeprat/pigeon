@@ -3441,6 +3441,7 @@ static void Snooze(int minutes)
 /* b: 0 seen, 1 archive, 2 star, 3 snooze, NBTN close */
 static void PopupAction(int b)
 {
+    if (g_alpha < 255) return;          /* already fading out: a second click must not act twice */
     if (b == NBTN) {                    /* close cross: same fade as timing out */
         KillTimer(g_popup, TIMER_HIDE);
         SetTimer(g_popup, TIMER_FADE, 30, NULL);
@@ -3467,7 +3468,8 @@ static void PopupAction(int b)
             CloseHandle(CreateThread(NULL, 0, ActThread, a, 0, NULL));
         }
     }
-    HidePopup(g_popup);
+    KillTimer(g_popup, TIMER_HIDE);     /* fade out, like the close cross */
+    SetTimer(g_popup, TIMER_FADE, 30, NULL);
 }
 
 /* ---------- Test menu: fake mail through the real queue and popup ---------- */
