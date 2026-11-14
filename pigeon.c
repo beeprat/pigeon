@@ -892,10 +892,45 @@ static COLORREF Mix(COLORREF a, COLORREF b, int k)
 }
 
 /* Antialiased clock face at (cx, cy): drawn 4x and shrunk; ang turns the minute hand (0 = 12 o'clock) */
-static void DrawClock(HDC dc, int cx, int cy, int rad, double ang, COLORREF ink, COLORREF bgc)
+/* glyph ch of font f centered at (x, y), to a quarter pixel: drawn 4x over a 4x copy of what's there, scaled back */
+static void GlyphAt(HDC dc, HFONT f, wchar_t ch, double x, double y, COLORREF ink)
 {
     const int S = 4;
-    int sz = 2 * rad + 4, c = sz * S / 2;
+    LOGFONTW lf;
+    HFONT big;
+    HDC m;
+    HBITMAP bm;
+    HGDIOBJ obm, of;
+    int half, L, T, w;
+    RECT tr;
+    GetObjectW(f, sizeof lf, &lf);
+    half = abs(lf.lfHeight) / 2 + 3;
+    lf.lfHeight *= S; lf.lfQuality = ANTIALIASED_QUALITY;   /* no ClearType fringes once scaled */
+    big = CreateFontIndirectW(&lf);
+    L = (int)floor(x) - half; T = (int)floor(y) - half; w = 2 * half;
+    m = CreateCompatibleDC(dc);
+    bm = CreateCompatibleBitmap(dc, w * S, w * S);
+    obm = SelectObject(m, bm);
+    SetStretchBltMode(m, COLORONCOLOR);   /* exact pixel copies: the round trip leaves the background as it was */
+    StretchBlt(m, 0, 0, w * S, w * S, dc, L, T, w, w, SRCCOPY);
+    of = SelectObject(m, big);
+    SetBkMode(m, TRANSPARENT);
+    SetTextColor(m, ink);
+    tr.left = (int)((x - L) * S) - w * S; tr.right = tr.left + 2 * w * S;
+    tr.top = (int)((y - T) * S) - w * S; tr.bottom = tr.top + 2 * w * S;
+    DrawTextW(m, &ch, 1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_NOCLIP);
+    SetStretchBltMode(dc, HALFTONE);
+    SetBrushOrgEx(dc, 0, 0, NULL);
+    StretchBlt(dc, L, T, w, w, m, 0, 0, w * S, w * S, SRCCOPY);
+    SelectObject(m, of); SelectObject(m, obm);
+    DeleteObject(big); DeleteObject(bm); DeleteDC(m);
+}
+
+static void DrawClock(HDC dc, double fx, double fy, int rad, double ang, COLORREF ink, COLORREF bgc)
+{
+    const int S = 4;
+    int sz = 2 * rad + 4, cx = (int)floor(fx), cy = (int)floor(fy);
+    int c = sz * S / 2 + (int)((fx - cx) * S), cv = sz * S / 2 + (int)((fy - cy) * S);   /* quarter-pixel position */
     HDC m = CreateCompatibleDC(dc);
     HBITMAP bm = CreateCompatibleBitmap(dc, sz * S, sz * S);
     HGDIOBJ obm = SelectObject(m, bm), op, ob;
@@ -906,9 +941,9 @@ static void DrawClock(HDC dc, int cx, int cy, int rad, double ang, COLORREF ink,
     FillRect(m, &all, bb);
     op = SelectObject(m, pen);
     ob = SelectObject(m, GetStockObject(NULL_BRUSH));
-    Ellipse(m, c - rad * S, c - rad * S, c + rad * S, c + rad * S);
-    MoveToEx(m, c, c, NULL); LineTo(m, c + (int)(sin(ang) * rad * S * 0.62), c - (int)(cos(ang) * rad * S * 0.62));
-    MoveToEx(m, c, c, NULL); LineTo(m, c + (int)(sin(ha) * rad * S * 0.4), c - (int)(cos(ha) * rad * S * 0.4));
+    Ellipse(m, c - rad * S, cv - rad * S, c + rad * S, cv + rad * S);
+    MoveToEx(m, c, cv, NULL); LineTo(m, c + (int)(sin(ang) * rad * S * 0.62), cv - (int)(cos(ang) * rad * S * 0.62));
+    MoveToEx(m, c, cv, NULL); LineTo(m, c + (int)(sin(ha) * rad * S * 0.4), cv - (int)(cos(ha) * rad * S * 0.4));
     SelectObject(m, op); SelectObject(m, ob);
     SetStretchBltMode(dc, HALFTONE);
     SetBrushOrgEx(dc, 0, 0, NULL);
@@ -935,7 +970,8 @@ static void DrawButtons(HWND h, HDC dc)
     int i;
     if (g_anim) {                       /* clicked: the others fade, it slides to the middle, its icon plays */
         static const wchar_t *times[NBTN] = {L"10 min", L"1 hour", L"3 hours", L"8 hours"};
-        int b = g_anim - 1, k, cx, cy;
+        int b = g_anim - 1, k;
+        double cx, cy, off;
         double el = (double)(GetTickCount64() - g_animStart), p, e, q;
         RECT rc, r = BtnRect(h, b);
         COLORREF fg = BarFade(Gr(255)), bg = BarFade(Gr(48));
@@ -947,9 +983,10 @@ static void DrawButtons(HWND h, HDC dc)
         GetClientRect(h, &rc);
         for (i = 0; i < NBTN; i++)
             if (i != b) SmoothRound(dc, BtnRect(h, i), DP(8), Mix(BG, BarFade(Gr(22)), k));
-        OffsetRect(&r, (int)(((rc.right - (r.right - r.left)) / 2 - r.left) * e), 0);
+        off = ((rc.right - (r.right - r.left)) / 2 - r.left) * e;
+        cx = (r.left + r.right) / 2.0 + off; cy = (r.top + r.bottom) / 2.0;   /* icons move by fractions of a pixel */
+        OffsetRect(&r, (int)(off + 0.5), 0);
         SmoothRound(dc, r, DP(8), bg);
-        cx = (r.left + r.right) / 2; cy = (r.top + r.bottom) / 2;
         SetBkMode(dc, TRANSPARENT);
         of = SelectObject(dc, g_fontIcon);
         if (g_animSnz) {                /* the time label fades into a clock on the way; its hands go round once */
@@ -963,37 +1000,24 @@ static void DrawButtons(HWND h, HDC dc)
             }
         } else if (b == 1) {            /* archive: an envelope drops into the box */
             wchar_t box = 0xE7B8, env = 0xE715;
-            int y = cy - DP(16) + (int)(DP(14) * q * q);   /* falls in from above, speeding up */
-            RECT er = {r.left, y - DP(8), r.right, y + DP(8)};
-            SetTextColor(dc, fg);
-            DrawTextW(dc, &box, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            GlyphAt(dc, g_fontIcon, box, cx, cy, fg);
             if (q > 0) {
                 int sv = SaveDC(dc);
-                IntersectClipRect(dc, r.left, r.top, r.right, cy - DP(7));   /* gone once past the lid */
-                SelectObject(dc, g_fontIconS);
-                SetTextColor(dc, Mix(bg, fg, (int)(255 * (q < 0.25 ? q * 4 : 1))));
-                DrawTextW(dc, &env, 1, &er, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                IntersectClipRect(dc, r.left, r.top, r.right, (int)cy - DP(7));   /* gone once past the lid */
+                GlyphAt(dc, g_fontIconS, env, cx, cy - DP(16) + DP(14) * q * q,   /* falls in from above, speeding up */
+                        Mix(bg, fg, (int)(255 * (q < 0.25 ? q * 4 : 1))));
                 RestoreDC(dc, sv);
             }
         } else if (b == 2) {            /* star: fills in from the click on */
             wchar_t solid = 0xE735, line = 0xE734;
-            SetTextColor(dc, Mix(bg, fg, (int)(255 * p)));
-            DrawTextW(dc, &solid, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-            SetTextColor(dc, fg);
-            DrawTextW(dc, &line, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            GlyphAt(dc, g_fontIcon, solid, cx, cy, Mix(bg, fg, (int)(255 * p)));
+            GlyphAt(dc, g_fontIcon, line, cx, cy, fg);
         } else {                        /* read: envelope opens, the letter slides out to the right */
             wchar_t g = 0xE8C3, page = 0xE7C3;
             double m = (double)el / ANIM_MS;
-            RECT lr = r;
-            m = 1 - (1 - m) * (1 - m) * (1 - m);   /* out quickly, settles */
-            OffsetRect(&r, -(int)(DP(8) * m), 0);   /* envelope steps left, letter appears right: pair centered */
-            OffsetRect(&lr, (int)(DP(9) * m), 0);
-            SelectObject(dc, g_fontIconS);
-            SetTextColor(dc, Mix(bg, fg, (int)(255 * m)));
-            DrawTextW(dc, &page, 1, &lr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-            SelectObject(dc, g_fontIcon);
-            SetTextColor(dc, fg);
-            DrawTextW(dc, &g, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            m = m < 0.5 ? 4 * m * m * m : 1 - 4 * (1 - m) * (1 - m) * (1 - m);   /* ease in and out: no lurch */
+            GlyphAt(dc, g_fontIconS, page, cx + DP(9) * m, cy, Mix(bg, fg, (int)(255 * m)));   /* letter appears right */
+            GlyphAt(dc, g_fontIcon, g, cx - DP(8) * m, cy, fg);   /* envelope steps left: pair centered */
         }
         SelectObject(dc, of);
         return;
