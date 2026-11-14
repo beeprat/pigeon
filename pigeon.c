@@ -42,7 +42,7 @@
 #define TIMER_FADE 3
 #define TIMER_FADEIN 4
 #define TIMER_BAR 5
-#define TIMER_SEEN 9              /* popup: "mark as read" animation, then the fade */
+#define TIMER_ANIM 9              /* popup: button animation, then the fade */
 #define TIMER_TIP 8              /* popup: show the button tooltip after a rest */
 #define TIMER_QUIET 7            /* main window: checks once a minute whether quiet hours ended */
 #define TIMER_DND 6              /* main window: retry held popups once the fullscreen app is gone */
@@ -631,9 +631,10 @@ static int g_pw, g_ph;          /* popup size without the button bar */
 static int g_bar, g_barOn;      /* button bar: current height in px, sliding open or shut */
 static HFONT g_fontIcon, g_fontIconS;   /* g_fontIconS: the small close cross */
 static int g_hot = -1;          /* button under the mouse */
-#define SEEN_MS 900              /* "mark as read" animation length */
-static int g_seenAnim;           /* 1: "mark as read" playing */
-static ULONGLONG g_seenStart;    /* its GetTickCount64 start: frames follow the clock, not the timer's uneven ticks */
+#define ANIM_MS 900              /* "mark as read" animation length */
+static int g_anim;               /* button + 1 whose animation is playing, 0 none */
+static int g_animSnz;            /* it was a snooze time: label melts into a clock */
+static ULONGLONG g_animStart;    /* its GetTickCount64 start: frames follow the clock, not the timer's uneven ticks */
 static int g_snzMode;           /* bar shows snooze times instead of actions */
 typedef struct { wchar_t from[256], subj[256], url[512], to[256], prev[300]; Account *acc; unsigned long uid;
                  ULONGLONG when; } NewMail;   /* when: server receive time, FILETIME UTC; 0 = unknown */
@@ -896,29 +897,47 @@ static void DrawButtons(HWND h, HDC dc)
     static const wchar_t glyph[NBTN] = {0xE8C3, 0xE7B8, 0xE734, 0xE823};   /* read, archive, star, clock */
     HGDIOBJ of;
     int i;
-    if (g_seenAnim) {                   /* mark as read: the others fade, it slides to the middle, the envelope opens */
-        double t = (double)(GetTickCount64() - g_seenStart) / SEEN_MS, p, e;
+    if (g_anim) {                       /* clicked: the others fade, it slides to the middle, then its icon plays */
+        static const wchar_t *times[NBTN] = {L"10 min", L"1 hour", L"3 hours", L"8 hours"};
+        static const wchar_t from[NBTN] = {0xE715, 0xE7B8, 0xE734, 0xE823}, to[NBTN] = {0xE8C3, 0xE7B8, 0xE735, 0xE823};
+        int b = g_anim - 1, k, dy = 0;
+        double t = (double)(GetTickCount64() - g_animStart) / ANIM_MS, p, e, q;
+        RECT rc, r = BtnRect(h, b);
+        COLORREF fg = BarFade(Gr(255)), bg = BarFade(Gr(48));
         if (t > 1) t = 1;
         p = t < 0.7 ? t / 0.7 : 1;
         e = 1 - pow(1 - p, 5);          /* quick start, long gentle arrival */
-        int k = (int)(255 * (1 - p));
-        RECT rc, r = BtnRect(h, 0);
-        wchar_t g = t < 0.7 ? 0xE715 : 0xE8C3;   /* Mail (closed) -> Read (open) */
+        q = t < 0.7 ? 0 : (t - 0.7) / 0.3;   /* arrival phase, 0..1 */
+        k = (int)(255 * (1 - p));
         GetClientRect(h, &rc);
-        for (i = 1; i < NBTN; i++) {
+        for (i = 0; i < NBTN; i++) {
             RECT o = BtnRect(h, i);
             COLORREF c = BarFade(Gr(22));
+            if (i == b) continue;
             SmoothRound(dc, o, DP(8), RGB(GetRValue(BG) + (GetRValue(c) - GetRValue(BG)) * k / 255,
                                           GetGValue(BG) + (GetGValue(c) - GetGValue(BG)) * k / 255,
                                           GetBValue(BG) + (GetBValue(c) - GetBValue(BG)) * k / 255));
         }
         OffsetRect(&r, (int)(((rc.right - (r.right - r.left)) / 2 - r.left) * e), 0);
-        SmoothRound(dc, r, DP(8), BarFade(Gr(48)));
-        if (t >= 0.7) OffsetRect(&r, 0, -(int)(DP(4) * sin(3.14159 * (t - 0.7) / 0.3) + 0.5));   /* little hop as it opens */
-        of = SelectObject(dc, g_fontIcon);
+        SmoothRound(dc, r, DP(8), bg);
         SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, BarFade(Gr(255)));
-        DrawTextW(dc, &g, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        if (g_animSnz) {                /* the time label fades out, the clock fades in */
+            int a = q < 0.5 ? (int)(255 * (1 - 2 * q)) : (int)(255 * (2 * q - 1));
+            COLORREF c = RGB(GetRValue(bg) + (GetRValue(fg) - GetRValue(bg)) * a / 255,
+                             GetGValue(bg) + (GetGValue(fg) - GetGValue(bg)) * a / 255,
+                             GetBValue(bg) + (GetBValue(fg) - GetBValue(bg)) * a / 255);
+            SetTextColor(dc, c);
+            of = SelectObject(dc, q < 0.5 ? g_fontSmall : g_fontIcon);
+            if (q < 0.5) DrawTextW(dc, times[b], -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            else DrawTextW(dc, &to[3], 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        } else {
+            wchar_t g = q > 0 ? to[b] : from[b];
+            if (q > 0) dy = (int)(DP(4) * sin(3.14159 * q) + 0.5);
+            OffsetRect(&r, 0, b == 1 ? dy : -dy);   /* archive dips into the box; read and star hop */
+            of = SelectObject(dc, g_fontIcon);
+            SetTextColor(dc, fg);
+            DrawTextW(dc, &g, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        }
         SelectObject(dc, of);
         return;
     }
@@ -1072,8 +1091,8 @@ static void HidePopup(HWND h)
     KillTimer(h, TIMER_FADE);
     KillTimer(h, TIMER_FADEIN);
     KillTimer(h, TIMER_BAR);
-    KillTimer(h, TIMER_SEEN);
-    g_seenAnim = 0;
+    KillTimer(h, TIMER_ANIM);
+    g_anim = 0;
     g_bar = 0;
     g_alpha = 255;
     ShowWindow(h, SW_HIDE);
@@ -1190,7 +1209,7 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         int b = BtnAt(h, (short)LOWORD(l), (short)HIWORD(l) - VisTop());
         POINT pt = {(short)LOWORD(l), (short)HIWORD(l) - VisTop()};
         int sh = PtInRect(&g_subjRect, pt);
-        if (b != g_hot || sh != g_subjHot) { g_hot = b; g_subjHot = sh; BtnTip(h, -1); if (b >= 0) SetTimer(h, TIMER_TIP, 1000, NULL); else KillTimer(h, TIMER_TIP); InvalidateRect(h, NULL, FALSE); }
+        if (b != g_hot || sh != g_subjHot) { g_hot = b; g_subjHot = sh; BtnTip(h, -1); if (b >= 0 && !g_anim && g_alpha == 255) SetTimer(h, TIMER_TIP, 1000, NULL); else KillTimer(h, TIMER_TIP); InvalidateRect(h, NULL, FALSE); }
         if (!g_hover) {                         /* hold the popup while the mouse is on it */
             TRACKMOUSEEVENT te;
             te.cbSize = sizeof te;
@@ -1234,12 +1253,12 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         BtnTip(h, -1);
         g_snzMode = 0;
         g_subjHot = 0;
-        if (IsWindowVisible(h) && !g_seenAnim) HoverSize(h, 0);   /* keep the bar for the animation */
+        if (IsWindowVisible(h) && !g_anim) HoverSize(h, 0);   /* keep the bar for the animation */
         InvalidateRect(h, NULL, FALSE);
         if (IsWindowVisible(h)) SetTimer(h, TIMER_HIDE, 2000, NULL);
         return 0;
     case WM_TIMER:
-        if (w == TIMER_TIP) { KillTimer(h, TIMER_TIP); if (g_hover) BtnTip(h, g_hot); return 0; }
+        if (w == TIMER_TIP) { KillTimer(h, TIMER_TIP); if (g_hover && !g_anim && g_alpha == 255) BtnTip(h, g_hot); return 0; }
         if (w == TIMER_BAR) {               /* ease out: a third of the way each tick, about 0.15 s */
             int t = g_barOn ? DP(BAR) : 0, d = (t - g_bar) / 3;
             if (!d) d = t > g_bar ? 1 : -1;
@@ -1250,8 +1269,8 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         } else if (w == TIMER_HIDE) {
             KillTimer(h, TIMER_HIDE);
             SetTimer(h, TIMER_FADE, 30, NULL);
-        } else if (w == TIMER_SEEN) {
-            if (GetTickCount64() - g_seenStart >= SEEN_MS) { KillTimer(h, TIMER_SEEN); SetTimer(h, TIMER_FADE, 30, NULL); }
+        } else if (w == TIMER_ANIM) {
+            if (GetTickCount64() - g_animStart >= ANIM_MS) { KillTimer(h, TIMER_ANIM); SetTimer(h, TIMER_FADE, 30, NULL); }
             InvalidateRect(h, NULL, FALSE);
         } else if (w == TIMER_FADEIN) {
             g_alpha += 32;                      /* about 0.13 s */
@@ -3476,8 +3495,8 @@ static void Snooze(int minutes)
 /* b: 0 seen, 1 archive, 2 star, 3 snooze, NBTN close */
 static void PopupAction(int b)
 {
-    int seen = b == 0 && !g_snzMode;    /* in snooze mode button 0 is "10 min" */
-    if (g_alpha < 255 || g_seenAnim) return;   /* already going: a second click must not act twice */
+    int snz = g_snzMode;
+    if (g_alpha < 255 || g_anim) return;   /* already going: a second click must not act twice */
     if (b == NBTN) {                    /* close cross: same fade as timing out */
         KillTimer(g_popup, TIMER_HIDE);
         SetTimer(g_popup, TIMER_FADE, 30, NULL);
@@ -3505,11 +3524,13 @@ static void PopupAction(int b)
         }
     }
     KillTimer(g_popup, TIMER_HIDE);
+    KillTimer(g_popup, TIMER_TIP);      /* clicked before the tooltip came up: it never does */
     BtnTip(g_popup, -1);
-    if (seen && g_bar) {              /* mark as read: animation first; TIMER_SEEN starts the fade */
-        g_seenAnim = 1;
-        g_seenStart = GetTickCount64();
-        SetTimer(g_popup, TIMER_SEEN, 10, NULL);
+    if (b >= 0 && b < NBTN && g_bar) {  /* animation first; TIMER_ANIM starts the fade */
+        g_anim = b + 1;
+        g_animSnz = snz;
+        g_animStart = GetTickCount64();
+        SetTimer(g_popup, TIMER_ANIM, 10, NULL);
         InvalidateRect(g_popup, NULL, FALSE);
         return;
     }
