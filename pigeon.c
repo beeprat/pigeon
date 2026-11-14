@@ -990,7 +990,7 @@ static void DrawButtons(HWND h, HDC dc)
         SetBkMode(dc, TRANSPARENT);
         of = SelectObject(dc, g_fontIcon);
         if (g_animSnz) {                /* the time label fades into a clock on the way; its hands go round once */
-            double f = p < 0.5 ? p * 2 : 1, s2 = el < 100 ? 0 : el > 600 ? 1 : (el - 100) / 500;   /* one turn in half a second */
+            double f = p < 0.5 ? p * 2 : 1, s2 = el < 100 ? 0 : el > 900 ? 1 : (el - 100) / 800;   /* one turn, home at 0.9 s */
             s2 = s2 < 0.5 ? 2 * s2 * s2 : 1 - 2 * (1 - s2) * (1 - s2);   /* ease in and out */
             DrawClock(dc, cx, cy, DP(7), 6.28318 * s2, Mix(bg, fg, (int)(255 * f)), bg);   /* first: its square is opaque */
             if (f < 1) {
@@ -1001,7 +1001,7 @@ static void DrawButtons(HWND h, HDC dc)
         } else if (b == 1) {            /* archive: an envelope drops into the box */
             wchar_t box = 0xE7B8, env = 0xE715;
             int lid = (int)cy - DP(4), sv;   /* lid of the box glyph sits above this line */
-            double la = el < 250 ? 1 : el < 400 ? 1 - (el - 250) / 150 : el < 800 ? 0 : el < 950 ? (el - 800) / 150 : 1;
+            double la = el < 250 ? 1 : el < 400 ? 1 - (el - 250) / 150 : el < 800 ? 0 : el < 860 ? (el - 800) / 60 : 1;
             q = el < 350 ? 0 : el > 800 ? 1 : (el - 350) / 450;   /* drops once the lid is fading */
             sv = SaveDC(dc);
             IntersectClipRect(dc, r.left, lid, r.right, r.bottom);
