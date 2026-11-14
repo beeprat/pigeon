@@ -1266,9 +1266,14 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
             if (g_prev[0]) {
                 SelectObject(dc, g_fontSmall);
                 SetTextColor(dc, Gr(165));
-                tr.top = tr.bottom; tr.bottom = tr.top + g_h3 + (g_bar ? g_more : 0);
+                int more = g_bar < g_more ? g_bar : g_more;   /* opens and closes with the bar, a pixel at a time */
+                tr.top = tr.bottom; tr.bottom = tr.top + g_h3 + g_more;
+                SaveDC(dc);
+                IntersectClipRect(dc, tr.left, tr.top, tr.right, tr.top + g_h3 + more);   /* full text, wiped by the clip */
                 DrawTextW(dc, g_prev, -1, &tr, DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_NOPREFIX
-                          | (g_bar && g_more ? DT_WORDBREAK | DT_EDITCONTROL : DT_SINGLELINE));
+                          | (more ? DT_WORDBREAK | DT_EDITCONTROL : DT_SINGLELINE));
+                RestoreDC(dc, -1);
+                tr.bottom = tr.top + g_h3 + more;   /* the address line follows the edge */
             }
             if (g_to[0]) {                      /* faint: which address got it */
                 SelectObject(dc, g_fontSmall);
