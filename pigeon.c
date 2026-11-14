@@ -3748,6 +3748,8 @@ static void PopupAction(int b)
 #define IDT_STARTUP 3008
 #define IDT_PROVIDERS 3009
 
+static int g_noBatch;               /* test menu's provider popups still queued: shown one by one, not batched */
+
 static void FakeMailAcc(const wchar_t *from, const wchar_t *subj, const wchar_t *to, Account *acc)
 {
     NewMail *nm = calloc(1, sizeof *nm);
@@ -3783,6 +3785,7 @@ static void FakeProviders(void)
         FakeMailAcc(L"Name of sender", subj, TestTo(a), a);
         n++;
     }
+    g_noBatch = (int)n;
 }
 
 static INT_PTR CALLBACK TestProc(HWND d, UINT m, WPARAM w, LPARAM l)
@@ -4027,7 +4030,7 @@ static void ShowNext(void)
         SetTimer(g_main, TIMER_DND, 5000, NULL);
         return;
     }
-    if (g_qn >= BATCH) {                /* a pile-up: one "N new mails" popup instead of a long chain */
+    if (g_qn >= BATCH && !g_noBatch) {  /* a pile-up: one "N new mails" popup instead of a long chain */
         int i, total = 0;
         wchar_t who[256] = L"";
         nm = calloc(1, sizeof *nm);
@@ -4051,6 +4054,7 @@ static void ShowNext(void)
         g_qn = 0;
         nm->uid = NOMAIL;               /* nothing to act on: no button bar */
     } else {
+        if (g_noBatch) g_noBatch--;
         nm = g_q[0];
         memmove(g_q, g_q + 1, (--g_qn) * sizeof *g_q);
     }
