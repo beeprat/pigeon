@@ -73,7 +73,21 @@ static int g_dpi = 96;
 static int g_hover;
 static int g_corner;            /* 0 top right, 1 top left, 2 bottom right, 3 bottom left */
 static int g_fullHold = 1;      /* hold popups while a fullscreen app or game runs */
-static int g_quiet, g_quietFrom = 22, g_quietTo = 7;
+static int g_quiet, g_quietFrom = 22 * 60, g_quietTo = 7 * 60;   /* minutes after midnight */
+
+/* "22:30" or "22" -> minutes after midnight; -1 if not a time */
+static int ParseHM(const char *v)
+{
+    int h, mi = 0, n = 0;
+    if (sscanf_s(v, " %d%n", &h, &n) != 1) return -1;
+    v += n;
+    if (*v == ':') {
+        if (sscanf_s(v + 1, "%d%n", &mi, &n) != 1) return -1;
+        v += 1 + n;
+    }
+    while (*v == ' ') v++;
+    return !*v && h >= 0 && h < 24 && mi >= 0 && mi < 60 ? h * 60 + mi : -1;
+}
 static int g_colOrder[3] = {0, 1, 2}, g_colW[3];  /* account list: column order, widths in 96-dpi px (0 = default) */
 static int g_sortCol = -1, g_sortDir = 1;         /* -1: unsorted */
 static char g_vip[512], g_mute[512];   /* sender filters, UTF-8, comma separated parts of "Name <address>" */
@@ -88,6 +102,7 @@ static HINSTANCE g_inst;
 typedef struct Account Account;
 struct Account {
     char email[256], pass[PASSMAX];
+    char nick[64];              /* optional name shown instead of the address, e.g. "Work" */
     volatile int enabled;       /* notifications on for this account */
     volatile int removed;       /* removed in Settings: the slot stays, its thread idles */
     HANDLE wake;                /* wakes the account's thread early (new password, re-enabled) */
@@ -99,6 +114,12 @@ struct Account {
 };
 static Account g_acc[MAX_ACC];
 static int g_nacc;
+
+/* What popups call an account: its nickname, else its address. */
+static void AccLabel(const Account *a, wchar_t *w)
+{
+    MultiByteToWideChar(CP_UTF8, 0, a->nick[0] ? a->nick : a->email, -1, w, 256);
+}
 
 static char *Trim(char *s)
 {
@@ -434,8 +455,11 @@ static int SaveConfig(void)
         if (!ok) break;
         fprintf(f, "account=%s|%d|%s\r\n", g_acc[i].email, g_acc[i].enabled, hex);
     }
+    for (i = 0; i < g_nacc; i++)        /* own key, not a 4th account field: older versions would misread that */
+        if (!g_acc[i].removed && g_acc[i].nick[0]) fprintf(f, "nick=%s|%s\r\n", g_acc[i].email, g_acc[i].nick);
     fprintf(f, "popup=%d\r\nsound=%d\r\ncorner=%d\r\n", g_popupMs / 1000, g_sound, g_corner);
-    fprintf(f, "fullhold=%d\r\nquiet=%d\r\nquietfrom=%d\r\nquietto=%d\r\n", g_fullHold, g_quiet, g_quietFrom, g_quietTo);
+    fprintf(f, "fullhold=%d\r\nquiet=%d\r\nquietfrom=%02d:%02d\r\nquietto=%02d:%02d\r\n", g_fullHold, g_quiet,
+            g_quietFrom / 60, g_quietFrom % 60, g_quietTo / 60, g_quietTo % 60);
     fprintf(f, "vip=%s\r\nmute=%s\r\nmutecat=%d\r\n", g_vip, g_mute, g_muteCat);
     fprintf(f, "cols=%d %d %d %d %d %d %d %d\r\n", g_colOrder[0], g_colOrder[1], g_colOrder[2], g_colW[0], g_colW[1], g_colW[2], g_sortCol, g_sortDir);
     WideCharToMultiByte(CP_UTF8, 0, g_soundFile, -1, u8, sizeof u8, NULL, NULL);
@@ -504,8 +528,8 @@ static int LoadConfig(void)
                 g_sortDir = sd < 0 ? -1 : 1;
             }
         }
-        else if (strcmp(k, "quietfrom") == 0) g_quietFrom = atoi(v) % 24;
-        else if (strcmp(k, "quietto") == 0)  g_quietTo = atoi(v) % 24;
+        else if (strcmp(k, "quietfrom") == 0) { int t = ParseHM(v); if (t >= 0) g_quietFrom = t; }
+        else if (strcmp(k, "quietto") == 0)  { int t = ParseHM(v); if (t >= 0) g_quietTo = t; }
         else if (strcmp(k, "vip") == 0)      strcpy_s(g_vip, sizeof g_vip, v);
         else if (strcmp(k, "mute") == 0)     strcpy_s(g_mute, sizeof g_mute, v);
         else if (strcmp(k, "mutecat") == 0)  g_muteCat = atoi(v);
@@ -522,6 +546,14 @@ static int LoadConfig(void)
             if (!Unprotect(p2 + 1, ac->pass, sizeof ac->pass)) ac->pass[0] = 0;   /* other user/PC: re-add in Settings */
             PassSeal(ac->pass);
             g_nacc++;
+        }
+        else if (strcmp(k, "nick") == 0) {   /* email|name */
+            char *bar = strchr(v, '|');
+            int j;
+            if (!bar) continue;
+            *bar = 0;
+            for (j = 0; j < g_nacc; j++)
+                if (_stricmp(g_acc[j].email, v) == 0) strncpy_s(g_acc[j].nick, sizeof g_acc[j].nick, bar + 1, _TRUNCATE);
         }
         else if (strcmp(k, "email") == 0)    strncpy_s(oldEmail, sizeof oldEmail, v, _TRUNCATE);   /* old plain-text format */
         else if (strcmp(k, "password") == 0) {
@@ -1832,7 +1864,7 @@ static int FetchNew(Tls *t)
         if (blen > 0) Snippet(bestHdr, body, blen, best->prev, 300);
     }
     if (best) {
-        MultiByteToWideChar(CP_UTF8, 0, t->acc->email, -1, best->to, 256);
+        AccLabel(t->acc, best->to);
         if (count > 1) {
             wchar_t more[32];
             if (!best->from[0]) wcscpy_s(best->from, 256, L"New mail");
@@ -2010,10 +2042,10 @@ static void Kick(Account *a)
     if (a->wake) SetEvent(a->wake);
 }
 
-static const wchar_t *TestTo(const char *email)
+static const wchar_t *TestTo(const Account *a)
 {
     static wchar_t w[256];
-    MultiByteToWideChar(CP_UTF8, 0, email, -1, w, 256);
+    AccLabel(a, w);
     return w;
 }
 
@@ -2066,11 +2098,21 @@ static void ListStatus(HWND lv)
     }
 }
 
+/* List's Name column: "Work (me@x.com)", or just the address */
+static void ListName(int i, wchar_t *w)
+{
+    wchar_t n[64], e[256];
+    MultiByteToWideChar(CP_UTF8, 0, g_acc[i].email, -1, e, 256);
+    MultiByteToWideChar(CP_UTF8, 0, g_acc[i].nick, -1, n, 64);
+    if (n[0]) swprintf_s(w, 256, L"%s (%s)", n, e);
+    else wcscpy_s(w, 256, e);
+}
+
 static void ListAdd(HWND lv, int i)
 {
     wchar_t w[256];
     LVITEMW it;
-    MultiByteToWideChar(CP_UTF8, 0, g_acc[i].email, -1, w, 256);
+    ListName(i, w);
     memset(&it, 0, sizeof it);
     it.mask = LVIF_TEXT | LVIF_PARAM;
     it.iItem = ListView_GetItemCount(lv);
@@ -2311,6 +2353,20 @@ static LRESULT DrawHdr(NMCUSTOMDRAW *cd)
     return CDRF_SKIPDEFAULT;
 }
 
+#define WM_SAVECOLS (WM_APP + 20)
+
+/* Account list layout into the config, right away */
+static void SaveCols(HWND lv)
+{
+    int o[3], k;
+    if (Header_GetItemCount(ListView_GetHeader(lv)) != 3 || !ListView_GetColumnOrderArray(lv, 3, o)) return;
+    for (k = 0; k < 3; k++) {
+        g_colOrder[k] = o[k];
+        g_colW[k] = MulDiv(ListView_GetColumnWidth(lv, k), 96, g_dpi);
+    }
+    SaveConfig();
+}
+
 /* Header notifications go to the ListView, not the dialog, so catch them here. */
 static LRESULT CALLBACK LvProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR ref)
 {
@@ -2333,10 +2389,17 @@ static LRESULT CALLBACK LvProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, 
             }
             if (cd->hdr.code == HDN_ITEMCHANGEDW || cd->hdr.code == HDN_ENDDRAG) {   /* resized/moved: no leftover lines */
                 LRESULT r = DefSubclassProc(h, m, w, l);
+                PostMessageW(h, WM_SAVECOLS, 0, 0);   /* after the move lands: order isn't updated yet on HDN_ENDDRAG */
                 RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
                 return r;
             }
         }
+    }
+    if (m == WM_SAVECOLS) { SaveCols(h); return 0; }
+    if (m == WM_CTLCOLOREDIT) {         /* the rename box */
+        SetTextColor((HDC)w, INK);
+        SetBkColor((HDC)w, FIELD);
+        return (LRESULT)g_fieldBrush;
     }
     if (m == WM_NCDESTROY) RemoveWindowSubclass(h, LvProc, id);
     return DefSubclassProc(h, m, w, l);
@@ -2603,6 +2666,7 @@ static void SortList(HWND lv, int col)
         if (i == col) hi.fmt |= g_sortDir > 0 ? HDF_SORTUP : HDF_SORTDOWN;
         Header_SetItem(hd, i, &hi);
     }
+    SaveConfig();
 }
 
 /* Adds an account and starts watching it at once. Returns 1 if added. */
@@ -2632,8 +2696,14 @@ static void ApplySettings(HWND d)
     GetDlgItemTextW(d, IDC_SOUNDFILE, g_soundFile, MAX_PATH);
     g_fullHold = IsDlgButtonChecked(d, IDC_FULLHOLD) == BST_CHECKED;
     g_quiet = IsDlgButtonChecked(d, IDC_QUIET) == BST_CHECKED;
-    g_quietFrom = (int)GetDlgItemInt(d, IDC_QFROM, NULL, FALSE) % 24;
-    g_quietTo = (int)GetDlgItemInt(d, IDC_QTO, NULL, FALSE) % 24;
+    {   /* half-typed times ("2", "22:") keep the old value until valid */
+        char t[16];
+        int v;
+        GetDlgItemTextA(d, IDC_QFROM, t, sizeof t);
+        if ((v = ParseHM(t)) >= 0) g_quietFrom = v;
+        GetDlgItemTextA(d, IDC_QTO, t, sizeof t);
+        if ((v = ParseHM(t)) >= 0) g_quietTo = v;
+    }
     GetDlgItemTextW(d, IDC_VIP, w, 512);
     WideCharToMultiByte(CP_UTF8, 0, w, -1, g_vip, sizeof g_vip, NULL, NULL);
     GetDlgItemTextW(d, IDC_MUTE, w, 512);
@@ -2657,6 +2727,34 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         if (init || nm->hdr.idFrom != IDC_LIST) break;
         if (nm->hdr.code == NM_DBLCLK) { SendMessageW(d, WM_COMMAND, IDC_FIX, 0); return TRUE; }
         if (nm->hdr.code == LVN_COLUMNCLICK) { SortList(lv, nm->iSubItem); return TRUE; }
+        if (nm->hdr.code == LVN_BEGINLABELEDITW) {   /* rename: edit just the nickname */
+            NMLVDISPINFOW *di = (NMLVDISPINFOW *)l;
+            HWND ed = ListView_GetEditControl(lv);
+            wchar_t w[64];
+            if ((i = RowAcc(lv, di->item.iItem)) < 0) { SetWindowLongPtrW(d, DWLP_MSGRESULT, TRUE); return TRUE; }
+            MultiByteToWideChar(CP_UTF8, 0, g_acc[i].nick, -1, w, 64);
+            SetWindowTextW(ed, w);
+            SendMessageW(ed, EM_SETLIMITTEXT, 40, 0);
+            SendMessageW(ed, EM_SETCUEBANNER, TRUE, (LPARAM)L"Nickname, e.g. Work");
+            SetWindowLongPtrW(d, DWLP_MSGRESULT, FALSE);
+            return TRUE;
+        }
+        if (nm->hdr.code == LVN_ENDLABELEDITW) {
+            NMLVDISPINFOW *di = (NMLVDISPINFOW *)l;
+            wchar_t w[256], *c;
+            if (di->item.pszText && (i = RowAcc(lv, di->item.iItem)) >= 0) {
+                char *t;
+                for (c = di->item.pszText; *c; c++) if (*c == L'|' || *c < 32) *c = L' ';   /* | splits the config line */
+                WideCharToMultiByte(CP_UTF8, 0, di->item.pszText, -1, g_acc[i].nick, sizeof g_acc[i].nick, NULL, NULL);
+                t = Trim(g_acc[i].nick);
+                memmove(g_acc[i].nick, t, strlen(t) + 1);
+                ListName(i, w);
+                ListView_SetItemText(lv, di->item.iItem, 0, w);
+                SaveConfig();
+            }
+            SetWindowLongPtrW(d, DWLP_MSGRESULT, FALSE);   /* we set the text ourselves */
+            return TRUE;
+        }
         if (nm->hdr.code != LVN_ITEMCHANGED || !(nm->uChanged & LVIF_STATE) || !((nm->uNewState ^ nm->uOldState) & LVIS_STATEIMAGEMASK)) break;
         if ((i = RowAcc(lv, nm->iItem)) < 0) break;
         g_acc[i].enabled = ListView_GetCheckState(lv, nm->iItem) ? 1 : 0;
@@ -2731,8 +2829,13 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         SetDlgItemTextW(d, IDC_SOUNDFILE, g_soundFile);
         CheckDlgButton(d, IDC_FULLHOLD, g_fullHold ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(d, IDC_QUIET, g_quiet ? BST_CHECKED : BST_UNCHECKED);
-        SetDlgItemInt(d, IDC_QFROM, g_quietFrom, FALSE);
-        SetDlgItemInt(d, IDC_QTO, g_quietTo, FALSE);
+        {
+            wchar_t t[8];
+            swprintf_s(t, 8, L"%02d:%02d", g_quietFrom / 60, g_quietFrom % 60);
+            SetDlgItemTextW(d, IDC_QFROM, t);
+            swprintf_s(t, 8, L"%02d:%02d", g_quietTo / 60, g_quietTo % 60);
+            SetDlgItemTextW(d, IDC_QTO, t);
+        }
         {
             wchar_t w[512];
             MultiByteToWideChar(CP_UTF8, 0, g_vip, -1, w, 512);
@@ -2798,7 +2901,7 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
             wcscpy_s(keepFile, MAX_PATH, g_soundFile);
             g_sound = IsDlgButtonChecked(d, IDC_SOUND) == BST_CHECKED;     /* preview what is on screen */
             GetDlgItemTextW(d, IDC_SOUNDFILE, g_soundFile, MAX_PATH);
-            ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(g_acc[0].email) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?");
+            ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(&g_acc[0]) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?");
             PlayNotify();
             g_sound = keep;
             g_corner = keepCorner;
@@ -2807,12 +2910,6 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         }
         case IDCANCEL:                  /* Close, Esc and the X: write it all down */
             ApplySettings(d);
-            {   /* remember the account columns as left */
-                HWND lv = GetDlgItem(d, IDC_LIST);
-                int k;
-                ListView_GetColumnOrderArray(lv, 3, g_colOrder);
-                for (k = 0; k < 3; k++) g_colW[k] = MulDiv(ListView_GetColumnWidth(lv, k), 96, g_dpi);
-            }
             AutoStartSet(IsDlgButtonChecked(d, IDC_AUTOSTART) == BST_CHECKED);
             if (!SaveConfig()) MessageBoxW(d, L"Could not save settings.", L"pigeon", MB_ICONERROR);
             EndDialog(d, IDCANCEL);
@@ -3048,7 +3145,7 @@ static void FakeMail(const wchar_t *from, const wchar_t *subj, const wchar_t *to
 
 static INT_PTR CALLBACK TestProc(HWND d, UINT m, WPARAM w, LPARAM l)
 {
-    const wchar_t *to = g_nacc ? TestTo(g_acc[0].email) : NULL;
+    const wchar_t *to = g_nacc ? TestTo(&g_acc[0]) : NULL;
     int i;
     INT_PTR dr;
     if (DarkMsg(d, m, w, l, &dr)) return dr;
@@ -3069,7 +3166,7 @@ static INT_PTR CALLBACK TestProc(HWND d, UINT m, WPARAM w, LPARAM l)
         FakeMail(L"Third sender", L"Mail 3 of 3", to);
         break;
     case IDT_ACCOUNTS:
-        for (i = 0; i < g_nacc; i++) FakeMail(L"Name of sender", L"One popup per account", TestTo(g_acc[i].email));
+        for (i = 0; i < g_nacc; i++) FakeMail(L"Name of sender", L"One popup per account", TestTo(&g_acc[i]));
         break;
     case IDT_SOUND:  PlayNotify(); break;
     case IDT_RECHECK:   /* real mail: step back and reconnect; only unread ones pop up */
@@ -3234,10 +3331,12 @@ static void UpdateBadge(void)
 static int InQuietHours(void)
 {
     SYSTEMTIME st;
+    int now;
     if (!g_quiet || g_quietFrom == g_quietTo) return 0;
     GetLocalTime(&st);
-    return g_quietFrom < g_quietTo ? st.wHour >= g_quietFrom && st.wHour < g_quietTo
-                                   : st.wHour >= g_quietFrom || st.wHour < g_quietTo;
+    now = st.wHour * 60 + st.wMinute;
+    return g_quietFrom < g_quietTo ? now >= g_quietFrom && now < g_quietTo
+                                   : now >= g_quietFrom || now < g_quietTo;
 }
 
 /* A fullscreen game, video or presentation is in front */
@@ -3389,7 +3488,7 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
             static int open;
             if (!open) { open = 1; DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_TEST), NULL, TestProc, 0); open = 0; }
         }
-        if (LOWORD(w) == IDM_TEST) { memset(&g_cur, 0, sizeof g_cur); ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(g_acc[0].email) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?"); PlayNotify(); }
+        if (LOWORD(w) == IDM_TEST) { memset(&g_cur, 0, sizeof g_cur); ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(&g_acc[0]) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?"); PlayNotify(); }
         if (LOWORD(w) == IDM_EXIT) DestroyWindow(h);
         return 0;
     case WM_DESTROY:
@@ -3507,7 +3606,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
         UpdateTip();
         SnzLoad();
     }
-    if (wcsstr(cmd, L"--test")) ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(g_acc[0].email) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?");   /* preview */
+    if (wcsstr(cmd, L"--test")) ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(&g_acc[0]) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?");   /* preview */
     if (!g_nacc) {                            /* first run: straight to adding an account */
         if (!AddAccount(NULL)) DestroyWindow(g_main);
     } else if (!configured) {                 /* all accounts off: ask */
