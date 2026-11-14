@@ -2825,14 +2825,8 @@ static void ApplySettings(HWND d)
     GetDlgItemTextW(d, IDC_SOUNDFILE, g_soundFile, MAX_PATH);
     g_fullHold = IsDlgButtonChecked(d, IDC_FULLHOLD) == BST_CHECKED;
     g_quiet = IsDlgButtonChecked(d, IDC_QUIET) == BST_CHECKED;
-    {   /* half-typed times ("2", "22:") keep the old value until valid */
-        char t[16];
-        int v;
-        GetDlgItemTextA(d, IDC_QFROM, t, sizeof t);
-        if ((v = ParseHM(t)) >= 0) g_quietFrom = v;
-        GetDlgItemTextA(d, IDC_QTO, t, sizeof t);
-        if ((v = ParseHM(t)) >= 0) g_quietTo = v;
-    }
+    g_quietFrom = (int)SendDlgItemMessageW(d, IDC_QFROM, CB_GETITEMDATA, SendDlgItemMessageW(d, IDC_QFROM, CB_GETCURSEL, 0, 0), 0);
+    g_quietTo = (int)SendDlgItemMessageW(d, IDC_QTO, CB_GETITEMDATA, SendDlgItemMessageW(d, IDC_QTO, CB_GETCURSEL, 0, 0), 0);
     GetDlgItemTextW(d, IDC_VIP, w, 512);
     WideCharToMultiByte(CP_UTF8, 0, w, -1, g_vip, sizeof g_vip, NULL, NULL);
     GetDlgItemTextW(d, IDC_MUTE, w, 512);
@@ -2983,12 +2977,29 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         SetDlgItemTextW(d, IDC_SOUNDFILE, g_soundFile);
         CheckDlgButton(d, IDC_FULLHOLD, g_fullHold ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(d, IDC_QUIET, g_quiet ? BST_CHECKED : BST_UNCHECKED);
-        {
-            wchar_t t[8];
-            swprintf_s(t, 8, L"%02d:%02d", g_quietFrom / 60, g_quietFrom % 60);
-            SetDlgItemTextW(d, IDC_QFROM, t);
-            swprintf_s(t, 8, L"%02d:%02d", g_quietTo / 60, g_quietTo % 60);
-            SetDlgItemTextW(d, IDC_QTO, t);
+        {   /* every 15 minutes in the Windows clock format; a saved off-grid time (from the ini) gets its own entry */
+            int k, t, id;
+            for (k = 0; k < 2; k++) {
+                int want = k ? g_quietTo : g_quietFrom, sel = 0;
+                id = k ? IDC_QTO : IDC_QFROM;
+                for (t = 0; t < 24 * 60; t += 15) {
+                    int n = t;
+                    if (want > t - 15 && want < t) n = want;   /* off-grid: insert before this slot */
+                    for (;;) {
+                        SYSTEMTIME st = {0};
+                        wchar_t s[32];
+                        LRESULT ix;
+                        st.wHour = (WORD)(n / 60); st.wMinute = (WORD)(n % 60);
+                        GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, s, 32);
+                        ix = SendDlgItemMessageW(d, id, CB_ADDSTRING, 0, (LPARAM)s);
+                        SendDlgItemMessageW(d, id, CB_SETITEMDATA, ix, n);
+                        if (n == want) sel = (int)ix;
+                        if (n == t) break;
+                        n = t;
+                    }
+                }
+                SendDlgItemMessageW(d, id, CB_SETCURSEL, sel, 0);
+            }
         }
         {
             wchar_t w[512];
