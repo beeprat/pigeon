@@ -46,6 +46,7 @@
 #define TIMER_ANIM 9              /* popup: button animation, then the fade */
 #define TIMER_TIP 8              /* popup: show the button tooltip after a rest */
 #define TIMER_QUIET 7            /* main window: checks once a minute whether quiet hours ended */
+#define TIMER_UPD 10             /* main window: daily check for a new release */
 #define TIMER_DND 6              /* main window: retry held popups once the fullscreen app is gone */
 static int g_dwm;               /* 1 = Windows 11 draws corners, border and shadow */
 static int g_px, g_py;          /* popup resting position */
@@ -60,6 +61,7 @@ static int g_alpha = 255;       /* popup opacity during fade-out */
 #define IDM_SETTINGS 103
 #define IDM_TESTMENU 104
 #define IDM_PAUSE 105
+#define IDM_PAUSEDAY 106
 #define IDM_HIST 110            /* 110..119: recent popups */
 static NOTIFYICONDATAW g_nid;
 static UINT g_taskbarMsg;       /* "TaskbarCreated": Explorer restarted, the tray icon is gone */
@@ -629,6 +631,8 @@ static int g_h1, g_h2, g_h3;    /* line heights: sender, subject, address */
 #define HASBAR (g_cur.uid != NOMAIL)
 #define BAR (BTN + PAD)  /* height the popup grows by on hover */
 static int g_pw, g_ph;          /* popup size without the button bar */
+static int g_more;              /* extra preview lines shown while hovered, in pixels */
+#define BARH (DP(BAR) + g_more)  /* height the popup grows by on hover */
 static int g_bar, g_barOn;      /* button bar: current height in px, sliding open or shut */
 static HFONT g_fontIcon, g_fontIconS;   /* g_fontIconS: the small close cross */
 static int g_hot = -1;          /* button under the mouse */
@@ -825,7 +829,7 @@ static RECT BtnRect(HWND h, int b)
     bw = (rc.right - 2 * pad - (NBTN - 1) * gap) / NBTN;
     r.left = (rc.right - NBTN * bw - (NBTN - 1) * gap) / 2 + b * (bw + gap);   /* centered: rounding leftover split on both sides */
     r.right = r.left + bw;
-    r.top = g_ph;                       /* fixed under the content: the shrinking window clips it, never slides it over the text */
+    r.top = g_ph + g_more;              /* fixed under the content: the shrinking window clips it, never slides it over the text */
     r.bottom = r.top + DP(BTN);
     return r;
 }
@@ -957,7 +961,7 @@ static void DrawClock(HDC dc, double fx, double fy, int rad, double ang, COLORRE
 /* c faded toward the background by how far the bar has slid open */
 static COLORREF BarFade(COLORREF c)
 {
-    int a = g_bar * 255 / DP(BAR);
+    int a = g_bar * 255 / BARH;
     a = a * a / 255;                    /* lags the slide a little, so it fades in last */
     return RGB(GetRValue(BG) + (GetRValue(c) - GetRValue(BG)) * a / 255,
                GetGValue(BG) + (GetGValue(c) - GetGValue(BG)) * a / 255,
@@ -1061,7 +1065,7 @@ static void HoverSize(HWND h, int on)
 
 /* Top of the visible part: the window is always tall enough for the bar, a region shows only g_ph + g_bar.
    Resizing a window flashes what is behind it for a frame; changing a region does not. */
-static int VisTop(void) { return (g_corner & 2) ? DP(BAR) - g_bar : 0; }
+static int VisTop(void) { return (g_corner & 2) ? BARH - g_bar : 0; }
 
 static HWND g_shadow;            /* soft shadow under the popup: own per-pixel-alpha window, since region windows get none from DWM */
 
@@ -1124,11 +1128,11 @@ static void ApplyBar(HWND h)
     UpdShadow();
 }
 
-/* E archive, S star, Z snooze (then 1-4 pick the time), Esc close: only while the mouse is on the popup (it never takes focus, so hotkeys) */
+/* R mark read, E or A archive, S star, Z snooze (then 1-4 pick the time), Esc close: only while the mouse is on the popup (it never takes focus, so hotkeys) */
 /* Tooltip over the popup's bar buttons; b = button under the mouse, -1 hides it */
 static void BtnTip(HWND h, int b)
 {
-    static const wchar_t *act[NBTN] = {L"Mark as read", L"Archive (E)", L"Star (S)", L"Snooze (Z)"};
+    static const wchar_t *act[NBTN] = {L"Mark as read (R)", L"Archive (A)", L"Star (S)", L"Snooze (Z)"};
     static const wchar_t *snz[NBTN] = {L"10 minutes (1)", L"1 hour (2)", L"3 hours (3)", L"8 hours (4)"};
     static HWND tip;
     static TTTOOLINFOW ti;
@@ -1164,9 +1168,9 @@ static void BtnTip(HWND h, int b)
 
 static void Keys(HWND h, int on)
 {
-    static const UINT vk[] = {'E', 'S', 'Z', VK_ESCAPE, '1', '2', '3', '4'};
+    static const UINT vk[] = {'E', 'S', 'Z', VK_ESCAPE, '1', '2', '3', '4', 'R', 'A'};
     int i;
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < 10; i++) {
         UnregisterHotKey(h, i + 1);
         if (on) RegisterHotKey(h, i + 1, MOD_NOREPEAT, vk[i]);   /* taken by another app: that key just does nothing here */
     }
@@ -1262,8 +1266,9 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
             if (g_prev[0]) {
                 SelectObject(dc, g_fontSmall);
                 SetTextColor(dc, Gr(165));
-                tr.top = tr.bottom; tr.bottom = tr.top + g_h3;
-                DrawTextW(dc, g_prev, -1, &tr, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                tr.top = tr.bottom; tr.bottom = tr.top + g_h3 + (g_bar ? g_more : 0);
+                DrawTextW(dc, g_prev, -1, &tr, DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_NOPREFIX
+                          | (g_bar && g_more ? DT_WORDBREAK | DT_EDITCONTROL : DT_SINGLELINE));
             }
             if (g_to[0]) {                      /* faint: which address got it */
                 SelectObject(dc, g_fontSmall);
@@ -1329,9 +1334,10 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_HOTKEY:
         if (w == 4) HidePopup(h);
         else if (w >= 5 && w <= 8) { if (g_snzMode) PopupAction((int)w - 5); }   /* 1-4: snooze times */
-        else if (w >= 1 && w <= 3 && HASBAR) {
-            if (w != 3) g_snzMode = 0;  /* E and S act even while the times show */
-            PopupAction((int)w);        /* 1 archive, 2 star, 3 snooze */
+        else if ((w <= 3 || w >= 9) && HASBAR) {
+            int a = w == 9 ? 0 : w == 10 ? 1 : (int)w;   /* 0 read, 1 archive, 2 star, 3 snooze */
+            if (a != 3) g_snzMode = 0;  /* R, E, A and S act even while the times show */
+            PopupAction(a);
         }
         return 0;
     case WM_MOUSELEAVE:
@@ -1348,7 +1354,7 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_TIMER:
         if (w == TIMER_TIP) { KillTimer(h, TIMER_TIP); if (g_hover && !g_anim && g_alpha == 255) BtnTip(h, g_hot); return 0; }
         if (w == TIMER_BAR) {               /* ease out: a third of the way each tick, about 0.15 s */
-            int t = g_barOn ? DP(BAR) : 0, d = (t - g_bar) / 3;
+            int t = g_barOn ? BARH : 0, d = (t - g_bar) / 3;
             if (!d) d = t > g_bar ? 1 : -1;
             g_bar = t == g_bar ? t : g_bar + d;
             if (g_bar == t) KillTimer(h, TIMER_BAR);
@@ -1364,7 +1370,7 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
             g_alpha += 32;                      /* about 0.13 s */
             if (g_alpha >= 255) { g_alpha = 255; KillTimer(h, TIMER_FADEIN); }
             SetLayeredWindowAttributes(h, 0, (BYTE)g_alpha, LWA_ALPHA);
-            SetWindowPos(h, HWND_TOPMOST, g_px, g_py - ((g_corner & 2) ? DP(BAR) : 0) + ((g_corner & 2) ? 1 : -1) * (255 - g_alpha) * DP(10) / 255, 0, 0, SWP_NOACTIVATE | SWP_NOSIZE);
+            SetWindowPos(h, HWND_TOPMOST, g_px, g_py - ((g_corner & 2) ? BARH : 0) + ((g_corner & 2) ? 1 : -1) * (255 - g_alpha) * DP(10) / 255, 0, 0, SWP_NOACTIVATE | SWP_NOSIZE);
             UpdShadow();
         } else if (w == TIMER_FADE) {
             g_alpha -= 15;                      /* about 0.45 s fade */
@@ -1437,6 +1443,18 @@ static void ShowPopup(const wchar_t *from, const wchar_t *subj, const wchar_t *t
     if (w > (wa.right - wa.left) / 2) w = (wa.right - wa.left) / 2;
     ph = g_h1 + g_h2 + (g_to[0] ? g_h3 : 0) + (g_prev[0] ? g_h3 : 0);
     if (ph < DP(AV)) ph = DP(AV);
+    g_more = 0;
+    if (g_prev[0]) {            /* hovered, the preview opens up to 4 lines */
+        RECT r = {0, 0, w - 2 * DP(PAD) - DP(AV) - DP(GAP), 0}, one = r;
+        HDC dc = GetDC(NULL);
+        HGDIOBJ o = SelectObject(dc, g_fontSmall);
+        DrawTextW(dc, g_prev, -1, &r, DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX | DT_CALCRECT);
+        DrawTextW(dc, L"X", 1, &one, DT_NOPREFIX | DT_CALCRECT);
+        SelectObject(dc, o);
+        ReleaseDC(NULL, dc);
+        if (one.bottom > 0) g_more = (min(r.bottom / one.bottom, 4) - 1) * g_h3;
+        if (g_more < 0) g_more = 0;
+    }
     ph += 2 * DP(PAD);
 
     x = (g_corner & 1) ? wa.left + DP(16) : wa.right - w - DP(16);
@@ -1444,8 +1462,8 @@ static void ShowPopup(const wchar_t *from, const wchar_t *subj, const wchar_t *t
 
     g_px = x; g_py = y;
     g_pw = w; g_ph = ph;
-    if (g_corner & 2) y -= DP(BAR);     /* room for the bar; ApplyBar's region hides it until hovered */
-    ph += DP(BAR);
+    if (g_corner & 2) y -= BARH;        /* room for the bar; ApplyBar's region hides it until hovered */
+    ph += BARH;
     (void)rgn;
     KillTimer(g_popup, TIMER_FADE);
     g_alpha = 0;
@@ -3211,11 +3229,31 @@ static void SelfPath(wchar_t *p, const wchar_t *ext)   /* this exe's path, plus 
     wcscat_s(p, MAX_PATH, ext);
 }
 
-/* Settings "Check for updates": newest GitHub release, checked against its .sha256, swapped in for this exe,
-   restarted. Config lives in %APPDATA%, so nothing to carry over. */
+/* Public half of the release signing key (BCRYPT_ECCPUBLIC_BLOB, P-256). The private half is only in the
+   PIGEON_SIGNING_KEY secret of the GitHub build, which signs pigeon.exe into pigeon.exe.sig on release. */
+static const UCHAR g_relKey[72] = {0x45,0x43,0x53,0x31,0x20,0x00,0x00,0x00,0x7c,0xfb,0xa0,0x48,0x2d,0x05,0xac,0xa6,0x0c,0x40,0x1b,0x5b,0xce,0xdf,0xc6,0xf7,0xa8,0x9a,0x33,0x7e,0xe9,0x3f,0x93,0xba,0x58,0x99,0x9f,0x55,0x34,0xe2,0x71,0xfe,0x1e,0xed,0x8b,0x25,0x46,0x57,0x62,0x3b,0x04,0xe3,0xb7,0xbe,0x51,0x31,0x6c,0x79,0xa7,0x12,0xac,0xe9,0x10,0xfc,0x94,0x3c,0xef,0x3d,0x91,0x90,0x31,0x15,0x7d,0xe7};
+
+/* 1 if sig (64 bytes, r then s) is the release key's signature over the SHA-256 digest dig */
+static int SigOk(const UCHAR *dig, const UCHAR *sig, int n)
+{
+    BCRYPT_ALG_HANDLE a;
+    BCRYPT_KEY_HANDLE k;
+    int ok = 0;
+    if (n != 64 || BCryptOpenAlgorithmProvider(&a, BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0)) return 0;
+    if (!BCryptImportKeyPair(a, NULL, BCRYPT_ECCPUBLIC_BLOB, &k, (PUCHAR)g_relKey, sizeof g_relKey, 0)) {
+        ok = BCryptVerifySignature(k, NULL, (PUCHAR)dig, 32, (PUCHAR)sig, 64, 0) == 0;
+        BCryptDestroyKey(k);
+    }
+    BCryptCloseAlgorithmProvider(a, 0);
+    return ok;
+}
+
+/* Settings "Check for updates" (or a click on the new-version balloon, d = NULL): newest GitHub release,
+   checked against its .sig, swapped in for this exe, restarted. Config lives in %APPDATA%, so nothing to carry over. */
 static void Update(HWND d)
 {
-    char *buf = malloc(UPCAP), tag[64], exe[1024], sumUrl[1024], want[65], got[65];
+    char *buf = malloc(UPCAP), tag[64], exe[1024], sigUrl[1024];
+    UCHAR sig[64];
     wchar_t me[MAX_PATH], nw[MAX_PATH], old[MAX_PATH], msg[256];
     UCHAR dig[32];
     int n, i;
@@ -3237,7 +3275,7 @@ static void Update(HWND d)
         MessageBoxW(d, L"pigeon is up to date (" TEXT(PIGEON_VERSION) L").", L"pigeon", MB_ICONINFORMATION);
         return;
     }
-    if (!JsonStr(buf, "browser_download_url", ".exe", exe, sizeof exe) || !JsonStr(buf, "browser_download_url", ".exe.sha256", sumUrl, sizeof sumUrl)) {
+    if (!JsonStr(buf, "browser_download_url", ".exe", exe, sizeof exe) || !JsonStr(buf, "browser_download_url", ".exe.sig", sigUrl, sizeof sigUrl)) {
         free(buf);
         MessageBoxW(d, L"The new release has no download yet. Try again later.", L"pigeon", MB_ICONWARNING);
         return;
@@ -3245,17 +3283,14 @@ static void Update(HWND d)
     swprintf_s(msg, 256, L"pigeon %hs is out (you have " TEXT(PIGEON_VERSION) L").\n\nDownload it and restart? Your settings and accounts are kept.", tag);
     if (MessageBoxW(d, msg, L"pigeon update", MB_YESNO | MB_ICONQUESTION) != IDYES) { free(buf); return; }
     SetCursor(LoadCursorW(NULL, IDC_WAIT));
-    if (HttpGet(sumUrl, buf, UPCAP) < 64) n = -1;
+    if (HttpGet(sigUrl, buf, UPCAP) != 64) n = -1;
     else {
-        for (i = 0; i < 64; i++) want[i] = (char)tolower((unsigned char)buf[i]);
-        want[64] = 0;
+        memcpy(sig, buf, 64);
         n = HttpGet(exe, buf, UPCAP);
     }
-    if (n > 0 && BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, (PUCHAR)buf, n, dig, 32) == 0)
-        for (i = 0; i < 32; i++) sprintf_s(got + i * 2, 3, "%02x", dig[i]);
-    else got[0] = 0;
+    i = n > 0 && BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, (PUCHAR)buf, n, dig, 32) == 0 && SigOk(dig, sig, 64);
     SetCursor(cur);
-    if (n <= 0 || strcmp(got, want)) {   /* download failed or doesn't match its checksum: keep this exe */
+    if (!i) {                           /* download failed or isn't signed by the release key: keep this exe */
         free(buf);
         MessageBoxW(d, L"The download failed or didn't check out. Nothing was changed.", L"pigeon", MB_ICONWARNING);
         return;
@@ -3279,6 +3314,23 @@ static void Update(HWND d)
     swprintf_s(nw, MAX_PATH, L"\"%s\" /after %lu", me, GetCurrentProcessId());   /* it waits for us to exit */
     if (CreateProcessW(me, nw, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) { CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
     PostMessageW(g_main, WM_COMMAND, IDM_EXIT, 0);
+}
+
+static char g_newTag[64];        /* newest release tag the daily check told about */
+#define WM_NEWVER (WM_APP + 6)    /* from UpdCheck: g_newTag differs from this build */
+
+/* Daily, on its own thread: is there a release other than this build? Tells the main window; never downloads. */
+static DWORD WINAPI UpdCheck(LPVOID p)
+{
+    char *buf = malloc(UPCAP), tag[64];
+    (void)p;
+    if (buf && HttpGet("https://api.github.com/repos/beeprat/pigeon/releases/latest", buf, UPCAP) > 0
+          && JsonStr(buf, "tag_name", "", tag, sizeof tag) && strcmp(tag, PIGEON_VERSION) && strcmp(tag, g_newTag)) {
+        strcpy_s(g_newTag, sizeof g_newTag, tag);
+        PostMessageW(g_main, WM_NEWVER, 0, 0);
+    }
+    free(buf);
+    return 0;
 }
 
 static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
@@ -4069,7 +4121,21 @@ static void ShowNext(void)
 LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     switch (m) {
+    case WM_NEWVER:                     /* balloon: pigeon vX is out; a click runs the usual update, which asks first */
+        g_nid.uFlags = NIF_INFO;
+        swprintf_s(g_nid.szInfoTitle, 64, L"pigeon %hs is out", g_newTag);
+        wcscpy_s(g_nid.szInfo, 256, L"Click to update.");
+        g_nid.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON;
+        Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+        g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+        return 0;
     case WM_TIMER:
+        if (w == TIMER_UPD) {
+            HANDLE t;
+            SetTimer(h, TIMER_UPD, 24 * 3600000, NULL);   /* first one a minute after start, then daily */
+            if ((t = CreateThread(NULL, 0, UpdCheck, NULL, 0, NULL)) != NULL) CloseHandle(t);
+            return 0;
+        }
         if (w == TIMER_QUIET && g_held && !InQuietHours()) {
             NewMail *nm = calloc(1, sizeof *nm);
             if (nm) {
@@ -4121,6 +4187,7 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_TRAY:
         if (LOWORD(l) == NIN_POPUPOPEN) { POINT pt = {GET_X_LPARAM(w), GET_Y_LPARAM(w)}; CardShow(pt); return 0; }
         if (LOWORD(l) == NIN_POPUPCLOSE) { if (g_card) ShowWindow(g_card, SW_HIDE); return 0; }
+        if (LOWORD(l) == NIN_BALLOONUSERCLICK) { Update(NULL); return 0; }
         l = LOWORD(l);                  /* NOTIFYICON_VERSION_4: event in the low word */
         if (g_card && l != WM_MOUSEMOVE) ShowWindow(g_card, SW_HIDE);   /* clicks hide it; hovering sends WM_MOUSEMOVE */
         if (l == WM_LBUTTONUP) {        /* inbox of the account with the most unread; Settings is in the right-click menu */
@@ -4148,6 +4215,7 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
             }
             AppendMenuW(menu, MF_STRING, IDM_PAUSE, NowMs() < g_pauseUntil ? L"Resume popups" : L"Pause popups for 1 hour");
+            if (NowMs() >= g_pauseUntil) AppendMenuW(menu, MF_STRING, IDM_PAUSEDAY, L"Pause popups until 8:00");
             AppendMenuW(menu, MF_STRING, IDM_SETTINGS, L"Settings...");
             if (g_testMode) {
                 AppendMenuW(menu, MF_STRING, IDM_TEST, L"Test");
@@ -4177,12 +4245,30 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
             SaveConfig();
             if (!g_pauseUntil) SendMessageW(h, WM_TIMER, TIMER_QUIET, 0);   /* resumed: held summary now, not in a minute */
         }
+        if (LOWORD(w) == IDM_PAUSEDAY) {        /* the next 8:00 local time */
+            SYSTEMTIME lt, ut;
+            FILETIME f;
+            ULARGE_INTEGER u;
+            GetLocalTime(&lt);
+            if (lt.wHour >= 8) {                /* tomorrow: step a day on the local calendar */
+                SystemTimeToFileTime(&lt, &f);
+                u.LowPart = f.dwLowDateTime; u.HighPart = f.dwHighDateTime;
+                u.QuadPart += 864000000000ULL;
+                f.dwLowDateTime = u.LowPart; f.dwHighDateTime = u.HighPart;
+                FileTimeToSystemTime(&f, &lt);
+            }
+            lt.wHour = 8; lt.wMinute = lt.wSecond = lt.wMilliseconds = 0;
+            if (TzSpecificLocalTimeToSystemTime(NULL, &lt, &ut) && SystemTimeToFileTime(&ut, &f)) {
+                g_pauseUntil = (((ULONGLONG)f.dwHighDateTime << 32) | f.dwLowDateTime) / 10000;
+                SaveConfig();
+            }
+        }
         if (LOWORD(w) == IDM_SETTINGS) OpenSettings();
         if (LOWORD(w) == IDM_TESTMENU) {
             static int open;
             if (!open) { open = 1; DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_TEST), NULL, TestProc, 0); open = 0; }
         }
-        if (LOWORD(w) == IDM_TEST) { memset(&g_cur, 0, sizeof g_cur); ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(&g_acc[0]) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?"); PlayNotify(); }
+        if (LOWORD(w) == IDM_TEST) { memset(&g_cur, 0, sizeof g_cur); ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(&g_acc[0]) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch? I was thinking of the new place on Main Street around 12:30, they have a patio and the menu looks great. Let me know if that works or if another day is better."); PlayNotify(); }
         if (LOWORD(w) == IDM_EXIT) DestroyWindow(h);
         return 0;
     case WM_SETTINGCHANGE:              /* light/dark switched: windows opened from now on follow */
@@ -4322,6 +4408,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
                                WS_POPUP, 0, 0, 1, 1, NULL, NULL, hInst, NULL);
     g_main = CreateWindowExW(0, L"GNMain", L"", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hInst, NULL);
     SetTimer(g_main, TIMER_QUIET, 60000, NULL);
+    SetTimer(g_main, TIMER_UPD, 60000, NULL);
 
     memset(&g_nid, 0, sizeof g_nid);
     g_nid.cbSize = sizeof g_nid;
