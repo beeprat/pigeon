@@ -122,6 +122,7 @@ struct Account {
     int tag;
     volatile int unread;        /* unread mails in the inbox, for the tray badge */
     int muted;                  /* no popups for this account; still counted in the badge */
+    int primary;                /* the tray click opens this inbox; at most one account has it */
 };
 static Account g_acc[MAX_ACC];
 static int g_nacc;
@@ -476,6 +477,8 @@ static int SaveConfig(void)
         if (!g_acc[i].removed && g_acc[i].nick[0]) fprintf(f, "nick=%s|%s\r\n", g_acc[i].email, g_acc[i].nick);
     for (i = 0; i < g_nacc; i++)
         if (!g_acc[i].removed && g_acc[i].muted) fprintf(f, "muted=%s\r\n", g_acc[i].email);
+    for (i = 0; i < g_nacc; i++)
+        if (!g_acc[i].removed && g_acc[i].primary) fprintf(f, "primary=%s\r\n", g_acc[i].email);
     fprintf(f, "popup=%d\r\nsound=%d\r\ncorner=%d\r\n", g_popupMs / 1000, g_sound, g_corner);
     fprintf(f, "fullhold=%d\r\nquiet=%d\r\nquietfrom=%02d:%02d\r\nquietto=%02d:%02d\r\n", g_fullHold, g_quiet,
             g_quietFrom / 60, g_quietFrom % 60, g_quietTo / 60, g_quietTo % 60);
@@ -578,6 +581,10 @@ static int LoadConfig(void)
         else if (strcmp(k, "muted") == 0) {
             int j;
             for (j = 0; j < g_nacc; j++) if (_stricmp(g_acc[j].email, v) == 0) g_acc[j].muted = 1;
+        }
+        else if (strcmp(k, "primary") == 0) {
+            int j;
+            for (j = 0; j < g_nacc; j++) g_acc[j].primary = _stricmp(g_acc[j].email, v) == 0;
         }
         else if (strcmp(k, "email") == 0)    strncpy_s(oldEmail, sizeof oldEmail, v, _TRUNCATE);   /* old plain-text format */
         else if (strcmp(k, "password") == 0) {
@@ -2526,8 +2533,8 @@ static void ListStatus(HWND lv)
     int row, n = ListView_GetItemCount(lv);
     for (row = 0; row < n; row++) {
         Account *a = &g_acc[RowAcc(lv, row)];
-        wchar_t t[40];
-        swprintf_s(t, 40, L"%s%s", a->enabled ? names[a->state & 3] : L"off", a->muted ? L", muted" : L"");
+        wchar_t t[48];
+        swprintf_s(t, 48, L"%s%s%s", a->enabled ? names[a->state & 3] : L"off", a->muted ? L", muted" : L"", a->primary ? L", primary" : L"");
         ListView_SetItemText(lv, row, 1, t);
     }
 }
@@ -3388,6 +3395,7 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
             ListView_SetItemState(lv, row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
             AppendMenuW(pm, MF_STRING, 1, L"Set nickname...	F2");
             AppendMenuW(pm, MF_STRING | (g_acc[RowAcc(lv, row)].muted ? MF_CHECKED : 0), 4, L"Mute popups");
+            AppendMenuW(pm, MF_STRING | (g_acc[RowAcc(lv, row)].primary ? MF_CHECKED : 0), 5, L"Primary (tray click opens it)");
             AppendMenuW(pm, MF_STRING, 2, L"Fix sign-in");
             AppendMenuW(pm, MF_SEPARATOR, 0, NULL);
             AppendMenuW(pm, MF_STRING, 3, L"Remove");
@@ -3396,6 +3404,13 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
             DestroyMenu(pm);
             if (cmd == 1) { SetFocus(lv); g_editOk = 1; ListView_EditLabel(lv, row); }
             if (cmd == 4 && (i = RowAcc(lv, row)) >= 0) { g_acc[i].muted = !g_acc[i].muted; ListStatus(lv); SaveConfig(); }
+            if (cmd == 5 && (i = RowAcc(lv, row)) >= 0) {   /* one primary: picking it again unsets it */
+                int j, on = !g_acc[i].primary;
+                for (j = 0; j < g_nacc; j++) g_acc[j].primary = 0;
+                g_acc[i].primary = on;
+                ListStatus(lv);
+                SaveConfig();
+            }
             if (cmd == 2) SendMessageW(d, WM_COMMAND, IDC_FIX, 0);
             if (cmd == 3) SendMessageW(d, WM_COMMAND, IDC_REMOVE, 0);
             return TRUE;
@@ -4222,11 +4237,14 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (LOWORD(l) == NIN_BALLOONUSERCLICK) { Update(NULL); return 0; }
         l = LOWORD(l);                  /* NOTIFYICON_VERSION_4: event in the low word */
         if (g_card && l != WM_MOUSEMOVE) ShowWindow(g_card, SW_HIDE);   /* clicks hide it; hovering sends WM_MOUSEMOVE */
-        if (l == WM_LBUTTONUP) {        /* inbox of the account with the most unread; Settings is in the right-click menu */
+        if (l == WM_LBUTTONUP) {        /* the primary account's inbox, else the one with the most unread; Settings is in the right-click menu */
             wchar_t url[512] = L"https://mail.google.com/mail/#inbox";
             int i, best = -1;
             for (i = 0; i < g_nacc; i++)
-                if (g_acc[i].enabled && (best < 0 || g_acc[i].unread > g_acc[best].unread)) best = i;
+                if (g_acc[i].enabled && !g_acc[i].removed && g_acc[i].primary) best = i;
+            if (best < 0)
+                for (i = 0; i < g_nacc; i++)
+                    if (g_acc[i].enabled && (best < 0 || g_acc[i].unread > g_acc[best].unread)) best = i;
             if (best >= 0) InboxUrl(g_acc[best].email, url);
             ShellExecuteW(NULL, L"open", url, NULL, NULL, SW_SHOWNORMAL);
         }
