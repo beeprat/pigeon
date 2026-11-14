@@ -7,6 +7,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <windowsx.h>
 #include <math.h>
 #include <security.h>
 #include <schannel.h>
@@ -1515,7 +1516,112 @@ static void TlsClose(Tls *t)
     t->s = INVALID_SOCKET;
 }
 
-/* Tray tooltip: one line per enabled account. */
+/* Tray hover card: our own tooltip, drawn like the popup. Total unread, then one row per enabled account. */
+static HWND g_card;
+static POINT g_cardAt;              /* the tray icon, from NIN_POPUPOPEN */
+#define CARD_W 260
+#define CARD_ROW 22
+
+static int CardRows(void)
+{
+    int i, n = 0;
+    for (i = 0; i < g_nacc; i++) n += g_acc[i].enabled;
+    return n;
+}
+
+static void CardPaint(HWND h, HDC dc)
+{
+    static const wchar_t *names[] = {L"connecting", L"", L"offline", L"sign-in failed"};
+    static HFONT big, row;
+    static int bigDpi;
+    RECT rc, t;
+    HBRUSH br;
+    HPEN pen;
+    HGDIOBJ op, ob, of;
+    wchar_t s[300];
+    int i, y, unread = 0;
+    if (!big || bigDpi != g_dpi) { if (big) DeleteObject(big), DeleteObject(row);
+        big = MakeFont(DP(-20), FW_SEMIBOLD); row = MakeFont(DP(-12), FW_NORMAL); bigDpi = g_dpi; }
+    GetClientRect(h, &rc);
+    br = CreateSolidBrush(BG); FillRect(dc, &rc, br); DeleteObject(br);
+    pen = CreatePen(PS_SOLID, 1, Gr(60));   /* hairline edge, like the popup */
+    op = SelectObject(dc, pen); ob = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    RoundRect(dc, 0, 0, rc.right, rc.bottom, DP(16), DP(16));
+    SelectObject(dc, ob); SelectObject(dc, op); DeleteObject(pen);
+    for (i = 0; i < g_nacc; i++) if (g_acc[i].enabled && g_acc[i].state == 1) unread += g_acc[i].unread;
+    SetBkMode(dc, TRANSPARENT);
+    of = SelectObject(dc, big);
+    SetTextColor(dc, Gr(255));
+    swprintf_s(s, 300, unread ? L"%d unread" : L"No unread mail", unread);
+    SetRect(&t, DP(16), DP(10), rc.right - DP(16), DP(40));
+    DrawTextW(dc, s, -1, &t, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    SelectObject(dc, row);
+    for (i = 0, y = DP(44); i < g_nacc; i++) {
+        Account *a = &g_acc[i];
+        COLORREF dot = a->state == 1 ? RGB(76, 194, 108) : a->state == 3 ? RGB(232, 72, 72) : Gr(110);
+        HBRUSH db;
+        RECT d;
+        if (!a->enabled) continue;
+        SetRect(&d, DP(16), y + DP(CARD_ROW) / 2 - DP(4), DP(16) + DP(8), y + DP(CARD_ROW) / 2 + DP(4));
+        db = CreateSolidBrush(dot);
+        pen = CreatePen(PS_SOLID, 1, dot);
+        op = SelectObject(dc, pen); ob = SelectObject(dc, db);
+        Ellipse(dc, d.left, d.top, d.right, d.bottom);   /* green connected, gray offline or connecting, red sign-in failed */
+        SelectObject(dc, ob); SelectObject(dc, op); DeleteObject(pen); DeleteObject(db);
+        if (a->state == 1) swprintf_s(s, 300, L"%d", a->unread);
+        else wcscpy_s(s, 300, names[a->state & 3]);
+        SetRect(&t, DP(32), y, rc.right - DP(16), y + DP(CARD_ROW));
+        SetTextColor(dc, a->state == 1 && a->unread ? Gr(255) : Gr(150));
+        DrawTextW(dc, s, -1, &t, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        t.right -= DP(60);              /* room for the count */
+        swprintf_s(s, 300, L"%hs", a->nick[0] ? a->nick : a->email);
+        SetTextColor(dc, Gr(210));
+        DrawTextW(dc, s, -1, &t, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        y += DP(CARD_ROW);
+    }
+    SelectObject(dc, of);
+}
+
+static LRESULT CALLBACK CardProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    if (m == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(h, &ps);
+        CardPaint(h, dc);
+        EndPaint(h, &ps);
+        return 0;
+    }
+    if (m == WM_NCHITTEST) return HTTRANSPARENT;
+    return DefWindowProcW(h, m, w, l);
+}
+
+/* Show (or refit) the card next to the tray icon at pt, inside that screen's work area. */
+static void CardShow(POINT pt)
+{
+    MONITORINFO mi = {sizeof mi};
+    int w = DP(CARD_W), hh = DP(52) + DP(CARD_ROW) * CardRows(), x, y;
+    g_cardAt = pt;
+    GetMonitorInfoW(MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST), &mi);
+    x = pt.x - w / 2;
+    if (x + w > mi.rcWork.right - DP(8)) x = mi.rcWork.right - DP(8) - w;
+    if (x < mi.rcWork.left + DP(8)) x = mi.rcWork.left + DP(8);
+    y = pt.y > (mi.rcWork.top + mi.rcWork.bottom) / 2 ? mi.rcWork.bottom - DP(8) - hh : mi.rcWork.top + DP(8);   /* taskbar below or above */
+    if (!g_card) {
+        WNDCLASSEXW wc = {sizeof wc};
+        wc.hInstance = GetModuleHandleW(NULL);
+        wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
+        wc.lpfnWndProc = CardProc;
+        wc.lpszClassName = L"GNCard";
+        RegisterClassExW(&wc);
+        g_card = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"GNCard", L"", WS_POPUP,
+                                 0, 0, 0, 0, NULL, NULL, wc.hInstance, NULL);
+    }
+    SetWindowRgn(g_card, CreateRoundRectRgn(0, 0, w + 1, hh + 1, DP(16), DP(16)), FALSE);
+    SetWindowPos(g_card, HWND_TOPMOST, x, y, w, hh, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    InvalidateRect(g_card, NULL, TRUE);
+}
+
+/* Tray tooltip: one line per enabled account (screen readers; the card is what's shown). */
 static void UpdateTip(void)
 {
     static const wchar_t *names[] = {L"connecting", L"connected", L"offline, retrying", L"login failed"};
@@ -1537,6 +1643,7 @@ static void UpdateTip(void)
         wcsncat_s(tip, 128, line, _TRUNCATE);
     }
     SetTip(tip);
+    if (g_card && IsWindowVisible(g_card)) CardShow(g_cardAt);   /* open: follow the change */
 }
 
 static void SetState(Account *a, int st)
@@ -3975,9 +4082,13 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         SaveConfig();
         return 0;
     default:
-        if (m == g_taskbarMsg && m) { Shell_NotifyIconW(NIM_ADD, &g_nid); UpdateBadge(); return 0; }   /* Explorer restarted */
+        if (m == g_taskbarMsg && m) { Shell_NotifyIconW(NIM_ADD, &g_nid); Shell_NotifyIconW(NIM_SETVERSION, &g_nid); UpdateBadge(); return 0; }   /* Explorer restarted */
         break;
     case WM_TRAY:
+        if (LOWORD(l) == NIN_POPUPOPEN) { POINT pt = {GET_X_LPARAM(w), GET_Y_LPARAM(w)}; CardShow(pt); return 0; }
+        if (LOWORD(l) == NIN_POPUPCLOSE) { if (g_card) ShowWindow(g_card, SW_HIDE); return 0; }
+        if (g_card) ShowWindow(g_card, SW_HIDE);   /* any click: the card goes */
+        l = LOWORD(l);                  /* NOTIFYICON_VERSION_4: event in the low word */
         if (l == WM_LBUTTONUP) {        /* inbox of the account with the most unread; Settings is in the right-click menu */
             wchar_t url[512] = L"https://mail.google.com/mail/#inbox";
             int i, best = -1;
@@ -4187,6 +4298,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
     g_nid.hIcon = g_baseIcon = LoadImageW(hInst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
     wcscpy_s(g_nid.szTip, 128, L"pigeon");
     Shell_NotifyIconW(NIM_ADD, &g_nid);
+    g_nid.uVersion = NOTIFYICON_VERSION_4;   /* no NIF_SHOWTIP: the shell sends NIN_POPUPOPEN/CLOSE and we draw the card */
+    Shell_NotifyIconW(NIM_SETVERSION, &g_nid);
 
     {
         WSADATA wsa;
