@@ -235,7 +235,7 @@ static void InboxUrl(const char *email, wchar_t *out)
 /* Microsoft sign-in. Register a free app at entra.microsoft.com: "Personal Microsoft accounts only",
    platform "Mobile and desktop", "Allow public client flows" = Yes. The client ID is not a secret. */
 #ifndef MS_CLIENT_ID
-#define MS_CLIENT_ID ""
+#define MS_CLIENT_ID "ac33a11d-4949-4f41-b8fe-f2c956002266"
 #endif
 #define MS_SCOPE "https://outlook.office.com/IMAP.AccessAsUser.All offline_access"
 
