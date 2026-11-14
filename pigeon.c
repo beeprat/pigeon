@@ -2438,11 +2438,27 @@ static void AddHint(HWND d)
     else if (_stricmp(at + 1, "gmail.com") == 0 || _stricmp(at + 1, "googlemail.com") == 0)
         wcscpy_s(hint, 200, L"Gmail detected. Needs an app password (2-Step Verification must be on).");
     else wcscpy_s(hint, 200, L"Custom domain: treated as Google Workspace. Needs an app password.");
-    SetDlgItemTextW(d, IDC_HINT, hint);
-    ShowWindow(GetDlgItem(d, IDC_PASSLBL), ms ? SW_HIDE : SW_SHOW);
-    ShowWindow(GetDlgItem(d, IDC_PASS), ms ? SW_HIDE : SW_SHOW);
-    ShowWindow(GetDlgItem(d, 2003), ms ? SW_HIDE : SW_SHOW);
-    InvalidateRect(d, NULL, TRUE);      /* repaint the rounded field behind the password edit */
+    {   /* only touch what changed: repainting on every keystroke flickers */
+        wchar_t old[200];
+        GetDlgItemTextW(d, IDC_HINT, old, 200);
+        if (wcscmp(old, hint) != 0) SetDlgItemTextW(d, IDC_HINT, hint);
+    }
+    if (!ms != !!IsWindowVisible(GetDlgItem(d, IDC_PASS))) {
+        ShowWindow(GetDlgItem(d, IDC_PASSLBL), ms ? SW_HIDE : SW_SHOW);
+        ShowWindow(GetDlgItem(d, IDC_PASS), ms ? SW_HIDE : SW_SHOW);
+        ShowWindow(GetDlgItem(d, 2003), ms ? SW_HIDE : SW_SHOW);
+        {   /* hint sits under the password, or takes its place when there is none */
+            RECT pl, pe, hr;
+            GetWindowRect(GetDlgItem(d, IDC_PASSLBL), &pl);
+            GetWindowRect(GetDlgItem(d, IDC_PASS), &pe);
+            GetWindowRect(GetDlgItem(d, IDC_HINT), &hr);
+            MapWindowPoints(NULL, d, (POINT *)&pl, 2);
+            MapWindowPoints(NULL, d, (POINT *)&pe, 2);
+            MapWindowPoints(NULL, d, (POINT *)&hr, 2);
+            SetWindowPos(GetDlgItem(d, IDC_HINT), NULL, hr.left, ms ? pl.top : pe.bottom + DP(10), 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+        }
+        InvalidateRect(d, NULL, TRUE);  /* repaint the rounded field behind the password edit */
+    }
 }
 
 static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)

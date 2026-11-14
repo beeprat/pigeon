@@ -53,19 +53,19 @@ BEGIN
     PUSHBUTTON      "Close", IDCANCEL, 208, 370, 60, 16
 END
 
-102 DIALOGEX 0, 0, 220, 116
+102 DIALOGEX 0, 0, 220, 118
 STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Add mail account"
 FONT 9, "Segoe UI", 400, 0, 1
 BEGIN
     LTEXT           "Email address:", -1, 8, 8, 200, 10
     EDITTEXT        2001, 10, 20, 200, 13, ES_AUTOHSCROLL
-    LTEXT           "", 2004, 8, 38, 204, 18
-    LTEXT           "App password:", 2005, 8, 60, 204, 10
-    EDITTEXT        2002, 10, 71, 200, 13, ES_AUTOHSCROLL | ES_PASSWORD
-    PUSHBUTTON      "Get app password...", 2003, 8, 94, 80, 14
-    DEFPUSHBUTTON   "Add", IDOK, 108, 94, 50, 14
-    PUSHBUTTON      "Cancel", IDCANCEL, 162, 94, 50, 14
+    LTEXT           "", 2004, 8, 70, 204, 18
+    LTEXT           "App password:", 2005, 8, 40, 204, 10
+    EDITTEXT        2002, 10, 51, 200, 13, ES_AUTOHSCROLL | ES_PASSWORD
+    PUSHBUTTON      "Get app password...", 2003, 8, 96, 80, 14
+    DEFPUSHBUTTON   "Add", IDOK, 108, 96, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 162, 96, 50, 14
 END
 
 103 DIALOGEX 0, 0, 180, 188
