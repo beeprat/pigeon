@@ -86,7 +86,9 @@ static HINSTANCE g_inst;
 typedef struct Account Account;
 struct Account {
     char email[256], pass[PASSMAX];
-    int enabled;                /* notifications on for this account */
+    volatile int enabled;       /* notifications on for this account */
+    volatile int removed;       /* removed in Settings: the slot stays, its thread idles */
+    HANDLE wake;                /* wakes the account's thread early (new password, re-enabled) */
     volatile SOCKET sock;       /* live IMAP socket, for ImapKick */
     volatile int state;         /* 0 connecting, 1 connected, 2 offline, 3 login failed */
     unsigned long uidnext;      /* next UID not yet seen, kept across reconnects */
@@ -423,6 +425,7 @@ static int SaveConfig(void)
           "; passwords are encrypted and only work for this Windows user.\r\n", f);
     for (i = 0; i < g_nacc; i++) {
         char plain[PASSMAX];
+        if (g_acc[i].removed) continue;
         PassOpen(g_acc[i].pass, plain);
         ok = Protect(plain, hex, sizeof hex);
         SecureZeroMemory(plain, sizeof plain);
@@ -1231,7 +1234,16 @@ static void UpdateTip(void)
 {
     static const wchar_t *names[] = {L"connecting", L"connected", L"offline, retrying", L"login failed"};
     wchar_t tip[128] = L"pigeon", line[128];
-    int i;
+    int i, unread = 0, off = 0, bad = 0;
+    for (i = 0; i < g_nacc; i++) {
+        if (!g_acc[i].enabled) continue;
+        unread += g_acc[i].state == 1 ? g_acc[i].unread : 0;
+        off += g_acc[i].state == 2;
+        bad += g_acc[i].state == 3;
+    }
+    swprintf_s(tip, 128, L"pigeon \x00b7 %d unread", unread);
+    if (off) { swprintf_s(line, 128, L" \x00b7 %d offline", off); wcsncat_s(tip, 128, line, _TRUNCATE); }
+    if (bad) { swprintf_s(line, 128, L" \x00b7 %d sign-in failed", bad); wcsncat_s(tip, 128, line, _TRUNCATE); }
     for (i = 0; i < g_nacc; i++) {
         if (!g_acc[i].enabled) continue;
         if (g_acc[i].state == 1) swprintf_s(line, 128, L"\n%hs: %d unread", g_acc[i].email, g_acc[i].unread);
@@ -1951,18 +1963,35 @@ static DWORD WINAPI ImapThread(LPVOID arg)
     t->s = INVALID_SOCKET;
     t->acc = (Account *)arg;
     for (;;) {
-        int r = ImapSession(t);
+        int r;
+        while (!t->acc->enabled || t->acc->removed) WaitForSingleObject(t->acc->wake, INFINITE);
+        r = ImapSession(t);
         TlsClose(t);
+        if (!t->acc->enabled || t->acc->removed) continue;
         if (r < 0) {
             SetState(t->acc, 3);
-            Sleep(5 * 60 * 1000);
+            WaitForSingleObject(t->acc->wake, 5 * 60 * 1000);   /* "Fix login" wakes it at once */
             continue;
         }
         SetState(t->acc, 2);
         if (r == 1) wait = 5;
-        Sleep(wait * 1000);
+        WaitForSingleObject(t->acc->wake, wait * 1000);
         if (wait < 60) wait *= 2;
     }
+}
+
+static void StartAccount(Account *a)
+{
+    a->wake = CreateEventW(NULL, FALSE, FALSE, NULL);
+    CloseHandle(CreateThread(NULL, 0, ImapThread, a, 0, NULL));
+}
+
+/* Drops the account's connection and wakes its thread, which then reconnects or idles. */
+static void Kick(Account *a)
+{
+    SOCKET s = a->sock;
+    if (s != INVALID_SOCKET) shutdown(s, SD_BOTH);
+    if (a->wake) SetEvent(a->wake);
 }
 
 static const wchar_t *TestTo(const char *email)
@@ -1993,29 +2022,46 @@ static const wchar_t *TestTo(const char *email)
 #define IDC_VIP 1015
 #define IDC_MUTE 1016
 #define IDC_MUTECAT 1017
+#define IDC_FIX 1018
 #define IDC_EMAIL 2001
 #define IDC_PASS 2002
+#define IDC_HINT 2004
+#define IDC_PASSLBL 2005
 
-static Account g_edit[MAX_ACC];     /* working copy; Cancel throws it away */
-static int g_nedit;
+#define WM_LISTSTATE (WM_APP + 7)  /* to Settings: an account's state changed */
 static HWND g_settings;
+
+static int RowAcc(HWND lv, int row)
+{
+    LVITEMW it;
+    memset(&it, 0, sizeof it);
+    it.mask = LVIF_PARAM;
+    it.iItem = row;
+    return ListView_GetItem(lv, &it) ? (int)it.lParam : -1;
+}
+
+static void ListStatus(HWND lv)
+{
+    static const wchar_t *names[] = {L"connecting", L"connected", L"offline", L"sign-in failed"};
+    int row, n = ListView_GetItemCount(lv);
+    for (row = 0; row < n; row++) {
+        Account *a = &g_acc[RowAcc(lv, row)];
+        ListView_SetItemText(lv, row, 1, a->enabled ? (wchar_t *)names[a->state & 3] : L"off");
+    }
+}
 
 static void ListAdd(HWND lv, int i)
 {
-    static const wchar_t *names[] = {L"connecting", L"connected", L"offline", L"login failed"};
     wchar_t w[256];
     LVITEMW it;
-    int k;
-    MultiByteToWideChar(CP_UTF8, 0, g_edit[i].email, -1, w, 256);
+    MultiByteToWideChar(CP_UTF8, 0, g_acc[i].email, -1, w, 256);
     memset(&it, 0, sizeof it);
-    it.mask = LVIF_TEXT;
-    it.iItem = i;
+    it.mask = LVIF_TEXT | LVIF_PARAM;
+    it.iItem = ListView_GetItemCount(lv);
     it.pszText = w;
-    ListView_InsertItem(lv, &it);
-    ListView_SetCheckState(lv, i, g_edit[i].enabled);
-    for (k = 0; k < g_nacc; k++)    /* live status, if this account is running now */
-        if (g_acc[k].enabled && strcmp(g_acc[k].email, g_edit[i].email) == 0)
-            ListView_SetItemText(lv, i, 1, (wchar_t *)names[g_acc[k].state & 3]);
+    it.lParam = i;
+    it.iItem = ListView_InsertItem(lv, &it);
+    ListView_SetCheckState(lv, it.iItem, g_acc[i].enabled);
 }
 
 #define RUN_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
@@ -2168,11 +2214,52 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
     return 0;
 }
 
+/* Under the address: which provider, and what it needs. The password row hides for Microsoft. */
+static void AddHint(HWND d)
+{
+    wchar_t we[256], hint[200] = L"";
+    char e8[256];
+    const char *at;
+    int ms;
+    GetDlgItemTextW(d, IDC_EMAIL, we, 256);
+    WideCharToMultiByte(CP_UTF8, 0, we, -1, e8, sizeof e8, NULL, NULL);
+    at = strrchr(e8, '@');
+    ms = at && Prov(e8)->kind == 2;
+    if (!at || !at[1]) ;
+    else if (ms) wcscpy_s(hint, 200, L"Outlook / Hotmail: click Add, then sign in with Microsoft in your browser. No password needed.");
+    else if (Prov(e8)->kind == 1) swprintf_s(hint, 200, L"%hs detected. Needs an app password, not your normal password.", at + 1);
+    else if (_stricmp(at + 1, "gmail.com") == 0 || _stricmp(at + 1, "googlemail.com") == 0)
+        wcscpy_s(hint, 200, L"Gmail detected. Needs an app password (2-Step Verification must be on).");
+    else wcscpy_s(hint, 200, L"Custom domain: treated as Google Workspace. Needs an app password.");
+    SetDlgItemTextW(d, IDC_HINT, hint);
+    ShowWindow(GetDlgItem(d, IDC_PASSLBL), ms ? SW_HIDE : SW_SHOW);
+    ShowWindow(GetDlgItem(d, IDC_PASS), ms ? SW_HIDE : SW_SHOW);
+    ShowWindow(GetDlgItem(d, 2003), ms ? SW_HIDE : SW_SHOW);
+    InvalidateRect(d, NULL, TRUE);      /* repaint the rounded field behind the password edit */
+}
+
 static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
 {
     INT_PTR dr;
     if (DarkMsg(d, m, w, l, &dr)) return dr;
-    if (m == WM_INITDIALOG) { DarkDlg(d); return TRUE; }
+    if (m == WM_INITDIALOG) {
+        Account *a = (Account *)l;
+        SetWindowLongPtrW(d, DWLP_USER, l);
+        DarkDlg(d);
+        if (a->email[0]) {              /* fix mode: same account, new password or sign-in */
+            wchar_t we[256];
+            MultiByteToWideChar(CP_UTF8, 0, a->email, -1, we, 256);
+            SetDlgItemTextW(d, IDC_EMAIL, we);
+            SendDlgItemMessageW(d, IDC_EMAIL, EM_SETREADONLY, TRUE, 0);
+            SetWindowTextW(d, L"Fix sign-in");
+            SetDlgItemTextW(d, IDOK, L"Save");
+            SetFocus(GetDlgItem(d, Prov(a->email)->kind == 2 ? IDOK : IDC_PASS));
+            return FALSE;
+        }
+        AddHint(d);
+        return TRUE;
+    }
+    if (m == WM_COMMAND && LOWORD(w) == IDC_EMAIL && HIWORD(w) == EN_CHANGE) { AddHint(d); return TRUE; }
     if (m == WM_COMMAND && LOWORD(w) == 2003) {
         wchar_t we[256], wu[256];
         char e8[256];
@@ -2189,7 +2276,8 @@ static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
     }
     if (m == WM_COMMAND && LOWORD(w) == IDOK) {
         wchar_t we[256], wp[128];
-        Account *a = &g_edit[g_nedit];
+        Account *dst = (Account *)GetWindowLongPtrW(d, DWLP_USER), tmp, *a = &tmp;
+        int fix = dst->email[0] != 0;
         size_t i, o = 0;
         int k;
         GetDlgItemTextW(d, IDC_EMAIL, we, 256);
@@ -2205,14 +2293,22 @@ static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
             MessageBoxW(d, L"Enter the email address and its app password.", L"pigeon", MB_ICONWARNING);
             return TRUE;
         }
-        for (k = 0; k < g_nedit; k++)
-            if (_stricmp(g_edit[k].email, a->email) == 0) {
+        for (k = 0; k < g_nacc && !fix; k++)
+            if (!g_acc[k].removed && _stricmp(g_acc[k].email, a->email) == 0) {
                 MessageBoxW(d, L"That account is already in the list.", L"pigeon", MB_ICONWARNING);
                 return TRUE;
             }
-        if (Prov(a->email)->kind == 2 && !MsSignIn(d, a)) return TRUE;   /* after the duplicate check: no sign-in for nothing */
-        a->enabled = 1;
-        a->sock = INVALID_SOCKET;
+        if (Prov(a->email)->kind == 2 && !MsSignIn(d, a)) { SecureZeroMemory(&tmp, sizeof tmp); return TRUE; }   /* after the duplicate check: no sign-in for nothing */
+        if (fix) {                      /* thread is idle or will fail once on the old one; then wake it */
+            memcpy(dst->pass, a->pass, PASSMAX);
+            dst->state = 0;
+            Kick(dst);
+        } else {                        /* new slot, no thread on it yet */
+            memcpy(dst, a, sizeof *dst);
+            dst->sock = INVALID_SOCKET;
+            dst->enabled = 1;
+        }
+        SecureZeroMemory(&tmp, sizeof tmp);
         EndDialog(d, IDOK);
         return TRUE;
     }
@@ -2220,17 +2316,74 @@ static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
     return FALSE;
 }
 
+/* Adds an account and starts watching it at once. Returns 1 if added. */
+static int AddAccount(HWND owner)
+{
+    Account *a = &g_acc[g_nacc];
+    /* shortcut: removed accounts keep their slot until pigeon restarts, so at most 8 adds per run; compact on load if that bites */
+    if (g_nacc >= MAX_ACC) { MessageBoxW(owner, L"Up to 8 accounts. Restart pigeon to free removed ones.", L"pigeon", MB_ICONINFORMATION); return 0; }
+    memset(a, 0, sizeof *a);
+    if (DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_ADD), owner, AddProc, (LPARAM)a) != IDOK) return 0;
+    StartAccount(a);
+    g_nacc++;
+    g_imap = 1;
+    SaveConfig();
+    UpdateTip();
+    return 1;
+}
+
+/* Settings take effect as they change; Close saves them to disk. */
+static void ApplySettings(HWND d)
+{
+    int secs = (int)GetDlgItemInt(d, IDC_POPUP, NULL, FALSE), c = (int)SendDlgItemMessageW(d, IDC_CORNER, CB_GETCURSEL, 0, 0);
+    wchar_t w[512];
+    g_popupMs = (secs < 1 ? 1 : secs > 60 ? 60 : secs) * 1000;
+    g_sound = IsDlgButtonChecked(d, IDC_SOUND) == BST_CHECKED;
+    if (c >= 0) g_corner = c & 3;
+    GetDlgItemTextW(d, IDC_SOUNDFILE, g_soundFile, MAX_PATH);
+    g_fullHold = IsDlgButtonChecked(d, IDC_FULLHOLD) == BST_CHECKED;
+    g_quiet = IsDlgButtonChecked(d, IDC_QUIET) == BST_CHECKED;
+    g_quietFrom = (int)GetDlgItemInt(d, IDC_QFROM, NULL, FALSE) % 24;
+    g_quietTo = (int)GetDlgItemInt(d, IDC_QTO, NULL, FALSE) % 24;
+    GetDlgItemTextW(d, IDC_VIP, w, 512);
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, g_vip, sizeof g_vip, NULL, NULL);
+    GetDlgItemTextW(d, IDC_MUTE, w, 512);
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, g_mute, sizeof g_mute, NULL, NULL);
+    g_muteCat = IsDlgButtonChecked(d, IDC_MUTECAT) == BST_CHECKED;
+}
+
 static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
 {
     HWND lv = GetDlgItem(d, IDC_LIST);
     INT_PTR dr;
+    static int init;                    /* filling controls: their change notifications are not edits */
     if (DarkMsg(d, m, w, l, &dr)) return dr;
     switch (m) {
+    case WM_LISTSTATE:
+        ListStatus(lv);
+        return TRUE;
+    case WM_NOTIFY: {
+        NMLISTVIEW *nm = (NMLISTVIEW *)l;
+        int i;
+        if (init || nm->hdr.idFrom != IDC_LIST) break;
+        if (nm->hdr.code == NM_DBLCLK) { SendMessageW(d, WM_COMMAND, IDC_FIX, 0); return TRUE; }
+        if (nm->hdr.code != LVN_ITEMCHANGED || !(nm->uChanged & LVIF_STATE) || !((nm->uNewState ^ nm->uOldState) & LVIS_STATEIMAGEMASK)) break;
+        if ((i = RowAcc(lv, nm->iItem)) < 0) break;
+        g_acc[i].enabled = ListView_GetCheckState(lv, nm->iItem) ? 1 : 0;
+        g_acc[i].state = 0;
+        Kick(&g_acc[i]);
+        g_imap = AnyEnabled();
+        SaveConfig();
+        UpdateTip();
+        ListStatus(lv);
+        return TRUE;
+    }
     case WM_INITDIALOG: {
         LVCOLUMNW c;
         RECT rc;
         int i;
         g_settings = d;
+        init = 1;
         DarkDlg(d);
         ListView_SetExtendedListViewStyle(lv, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT);
         GetClientRect(lv, &rc);
@@ -2242,9 +2395,8 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         c.pszText = L"Status";
         c.cx = rc.right - c.cx - GetSystemMetrics(SM_CXVSCROLL);
         ListView_InsertColumn(lv, 1, &c);
-        memcpy(g_edit, g_acc, sizeof g_acc);
-        g_nedit = g_nacc;
-        for (i = 0; i < g_nedit; i++) ListAdd(lv, i);
+        for (i = 0; i < g_nacc; i++) if (!g_acc[i].removed) ListAdd(lv, i);
+        ListStatus(lv);
         SetDlgItemInt(d, IDC_POPUP, g_popupMs / 1000, FALSE);
         CheckDlgButton(d, IDC_SOUND, g_sound ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(d, IDC_AUTOSTART, AutoStartGet() ? BST_CHECKED : BST_UNCHECKED);
@@ -2268,20 +2420,36 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
             SendMessageW(cb, CB_SETCURSEL, g_corner, 0);
         }
         SetForegroundWindow(d);
+        init = 0;
         return TRUE;
     }
     case WM_COMMAND:
+        if (!init && (HIWORD(w) == EN_CHANGE || HIWORD(w) == BN_CLICKED || HIWORD(w) == CBN_SELCHANGE)) ApplySettings(d);
         switch (LOWORD(w)) {
         case IDC_ADD:
-            if (g_nedit >= MAX_ACC) { MessageBoxW(d, L"Up to 8 accounts.", L"pigeon", MB_ICONINFORMATION); break; }
-            if (DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_ADD), d, AddProc, 0) == IDOK) ListAdd(lv, g_nedit++);
+            if (AddAccount(d)) { init = 1; ListAdd(lv, g_nacc - 1); init = 0; ListStatus(lv); }
             break;
         case IDC_REMOVE: {
-            int i = ListView_GetNextItem(lv, -1, LVNI_SELECTED);
+            int row = ListView_GetNextItem(lv, -1, LVNI_SELECTED), i = row < 0 ? -1 : RowAcc(lv, row);
             if (i < 0) break;
-            memmove(&g_edit[i], &g_edit[i + 1], (g_nedit - i - 1) * sizeof(Account));
-            g_nedit--;
-            ListView_DeleteItem(lv, i);
+            init = 1;                   /* deleting the row is not an uncheck */
+            ListView_DeleteItem(lv, row);
+            init = 0;
+            g_acc[i].removed = 1;
+            g_acc[i].enabled = 0;
+            Kick(&g_acc[i]);
+            g_imap = AnyEnabled();
+            SaveConfig();
+            UpdateTip();
+            break;
+        }
+        case IDC_FIX: {
+            int row = ListView_GetNextItem(lv, -1, LVNI_SELECTED), i = row < 0 ? -1 : RowAcc(lv, row);
+            if (i < 0) { MessageBoxW(d, L"Select an account first.", L"pigeon", MB_ICONINFORMATION); break; }
+            if (DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_ADD), d, AddProc, (LPARAM)&g_acc[i]) == IDOK) {
+                SaveConfig();
+                ListStatus(lv);
+            }
             break;
         }
         case IDC_BROWSE: {
@@ -2305,42 +2473,17 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
             wcscpy_s(keepFile, MAX_PATH, g_soundFile);
             g_sound = IsDlgButtonChecked(d, IDC_SOUND) == BST_CHECKED;     /* preview what is on screen */
             GetDlgItemTextW(d, IDC_SOUNDFILE, g_soundFile, MAX_PATH);
-            ShowPopup(L"Name of sender", L"Subject of the mail", g_nedit ? TestTo(g_edit[0].email) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?");
+            ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(g_acc[0].email) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?");
             PlayNotify();
             g_sound = keep;
             g_corner = keepCorner;
             wcscpy_s(g_soundFile, MAX_PATH, keepFile);
             break;
         }
-        case IDOK: {
-            int i, secs = (int)GetDlgItemInt(d, IDC_POPUP, NULL, FALSE);
-            for (i = 0; i < g_nedit; i++) g_edit[i].enabled = ListView_GetCheckState(lv, i) ? 1 : 0;
-            memcpy(g_acc, g_edit, sizeof g_acc);
-            g_nacc = g_nedit;
-            g_popupMs = (secs < 1 ? 1 : secs > 60 ? 60 : secs) * 1000;
-            g_sound = IsDlgButtonChecked(d, IDC_SOUND) == BST_CHECKED;
-            g_corner = (int)SendDlgItemMessageW(d, IDC_CORNER, CB_GETCURSEL, 0, 0) & 3;
-            GetDlgItemTextW(d, IDC_SOUNDFILE, g_soundFile, MAX_PATH);
-            g_fullHold = IsDlgButtonChecked(d, IDC_FULLHOLD) == BST_CHECKED;
-            g_quiet = IsDlgButtonChecked(d, IDC_QUIET) == BST_CHECKED;
-            g_quietFrom = (int)GetDlgItemInt(d, IDC_QFROM, NULL, FALSE) % 24;
-            g_quietTo = (int)GetDlgItemInt(d, IDC_QTO, NULL, FALSE) % 24;
-            {
-                wchar_t w[512];
-                GetDlgItemTextW(d, IDC_VIP, w, 512);
-                WideCharToMultiByte(CP_UTF8, 0, w, -1, g_vip, sizeof g_vip, NULL, NULL);
-                GetDlgItemTextW(d, IDC_MUTE, w, 512);
-                WideCharToMultiByte(CP_UTF8, 0, w, -1, g_mute, sizeof g_mute, NULL, NULL);
-            }
-            g_muteCat = IsDlgButtonChecked(d, IDC_MUTECAT) == BST_CHECKED;
-            SecureZeroMemory(g_edit, sizeof g_edit);
+        case IDCANCEL:                  /* Close, Esc and the X: write it all down */
+            ApplySettings(d);
             AutoStartSet(IsDlgButtonChecked(d, IDC_AUTOSTART) == BST_CHECKED);
-            if (!SaveConfig()) { MessageBoxW(d, L"Could not save settings.", L"pigeon", MB_ICONERROR); break; }
-            EndDialog(d, IDOK);
-            break;
-        }
-        case IDCANCEL:
-            SecureZeroMemory(g_edit, sizeof g_edit);
+            if (!SaveConfig()) MessageBoxW(d, L"Could not save settings.", L"pigeon", MB_ICONERROR);
             EndDialog(d, IDCANCEL);
             break;
         }
@@ -2610,21 +2753,10 @@ static INT_PTR CALLBACK TestProc(HWND d, UINT m, WPARAM w, LPARAM l)
     return TRUE;
 }
 
-/* Starts a fresh copy (new accounts/threads) and quits this one. */
-static void Restart(void)
+static void OpenSettings(void)
 {
-    wchar_t self[MAX_PATH];
-    GetModuleFileNameW(NULL, self, MAX_PATH);
-    CloseHandle(g_mutex);               /* let the new copy pass the single-instance check */
-    ShellExecuteW(NULL, L"open", self, NULL, NULL, SW_SHOWNORMAL);
-    DestroyWindow(g_main);
-}
-
-/* Shows Settings; returns 1 if saved. */
-static int OpenSettings(void)
-{
-    if (g_settings) { SetForegroundWindow(g_settings); return 0; }
-    return DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_SETTINGS), NULL, SettingsProc, 0) == IDOK;
+    if (g_settings) { SetForegroundWindow(g_settings); return; }
+    DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_SETTINGS), NULL, SettingsProc, 0);
 }
 
 /* ---------- Tray badge ---------- */
@@ -2854,6 +2986,7 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_UNREAD:
         UpdateBadge();
+        if (g_settings) PostMessageW(g_settings, WM_LISTSTATE, 0, 0);
         return 0;
     case WM_NEWMAIL:
         if (InQuietHours()) {           /* no popup now; one summary when quiet hours end (TIMER_QUIET) */
@@ -2920,7 +3053,7 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
                 else ShowNext();
             }
         }
-        if (LOWORD(w) == IDM_SETTINGS && OpenSettings()) Restart();
+        if (LOWORD(w) == IDM_SETTINGS) OpenSettings();
         if (LOWORD(w) == IDM_TESTMENU) {
             static int open;
             if (!open) { open = 1; DialogBoxParamW(g_inst, MAKEINTRESOURCEW(IDD_TEST), NULL, TestProc, 0); open = 0; }
@@ -3035,23 +3168,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
     wcscpy_s(g_nid.szTip, 128, L"pigeon");
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 
-    if (!configured) {                        /* first run or nothing enabled: ask */
-        if (OpenSettings()) Restart();
-        else DestroyWindow(g_main);
-    }
-    if (wcsstr(cmd, L"--test")) ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(g_acc[0].email) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?");   /* preview */
-    if (!configured) {
-        /* waiting for the restart or exit above */
-    } else if (g_imap) {
+    {
         WSADATA wsa;
         int i;
         WSAStartup(MAKEWORD(2, 2), &wsa);
+        for (i = 0; i < g_nacc; i++) StartAccount(&g_acc[i]);   /* disabled ones idle until checked */
         UpdateTip();
-        for (i = 0; i < g_nacc; i++)
-            if (g_acc[i].enabled) CloseHandle(CreateThread(NULL, 0, ImapThread, &g_acc[i], 0, NULL));
         SnzLoad();
-    } else {
-        /* unreachable: configured implies an enabled account */
+    }
+    if (wcsstr(cmd, L"--test")) ShowPopup(L"Name of sender", L"Subject of the mail", g_nacc ? TestTo(g_acc[0].email) : NULL, L"Hi! Just checking in about tomorrow, are we still on for lunch?");   /* preview */
+    if (!g_nacc) {                            /* first run: straight to adding an account */
+        if (!AddAccount(NULL)) DestroyWindow(g_main);
+    } else if (!configured) {                 /* all accounts off: ask */
+        OpenSettings();
+        if (!AnyEnabled()) DestroyWindow(g_main);
     }
 
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {
