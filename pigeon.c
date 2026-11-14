@@ -1622,7 +1622,7 @@ static void CardPaint(HWND h, HDC dc)
         SetTextColor(dc, a->state == 1 && a->unread ? Gr(255) : Gr(150));
         DrawTextW(dc, s, -1, &t, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         t.right -= DP(60);              /* room for the count */
-        swprintf_s(s, 300, L"%hs", a->nick[0] ? a->nick : a->email);
+        swprintf_s(s, 300, L"%s%hs", a->primary ? L"\u2605 " : L"", a->nick[0] ? a->nick : a->email);   /* star: the tray click opens it */
         SetTextColor(dc, Gr(210));
         DrawTextW(dc, s, -1, &t, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
         y += DP(CARD_ROW);
@@ -3263,8 +3263,22 @@ static void SelfPath(wchar_t *p, const wchar_t *ext)   /* this exe's path, plus 
    PIGEON_SIGNING_KEY secret of the GitHub build, which signs pigeon.exe into pigeon.exe.sig on release. */
 static const UCHAR g_relKey[72] = {0x45,0x43,0x53,0x31,0x20,0x00,0x00,0x00,0x7c,0xfb,0xa0,0x48,0x2d,0x05,0xac,0xa6,0x0c,0x40,0x1b,0x5b,0xce,0xdf,0xc6,0xf7,0xa8,0x9a,0x33,0x7e,0xe9,0x3f,0x93,0xba,0x58,0x99,0x9f,0x55,0x34,0xe2,0x71,0xfe,0x1e,0xed,0x8b,0x25,0x46,0x57,0x62,0x3b,0x04,0xe3,0xb7,0xbe,0x51,0x31,0x6c,0x79,0xa7,0x12,0xac,0xe9,0x10,0xfc,0x94,0x3c,0xef,0x3d,0x91,0x90,0x31,0x15,0x7d,0xe7};
 
+/* 1 if version tag a ("v1.2.3") is newer than b; missing parts count as 0 */
+static int VerNewer(const char *a, const char *b)
+{
+    int i, x, y;
+    if (*a == 'v') a++;
+    if (*b == 'v') b++;
+    for (i = 0; i < 4; i++) {
+        x = atoi(a); y = atoi(b);
+        if (x != y) return x > y;
+        a += strspn(a, "0123456789"); if (*a == '.') a++;
+        b += strspn(b, "0123456789"); if (*b == '.') b++;
+    }
+    return 0;
+}
+
 /* 1 if sig (64 bytes, r then s) is the release key's signature over the SHA-256 digest dig */
-/* shortcut: the signature covers the exe, not its version, so an older signed release served as "latest" would install; sign the tag too if releases ever move off GitHub */
 static int SigOk(const UCHAR *dig, const UCHAR *sig, int n)
 {
     BCRYPT_ALG_HANDLE a;
@@ -3301,7 +3315,7 @@ static void Update(HWND d)
         return;
     }
     SetCursor(cur);
-    if (!strcmp(tag, PIGEON_VERSION)) {
+    if (!VerNewer(tag, PIGEON_VERSION)) {   /* never offers an older release, even a signed one */
         free(buf);
         MessageBoxW(d, L"pigeon is up to date (" TEXT(PIGEON_VERSION) L").", L"pigeon", MB_ICONINFORMATION);
         return;
@@ -3319,7 +3333,15 @@ static void Update(HWND d)
         memcpy(sig, buf, 64);
         n = HttpGet(exe, buf, UPCAP);
     }
-    i = n > 0 && BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, (PUCHAR)buf, n, dig, 32) == 0 && SigOk(dig, sig, 64);
+    i = 0;
+    if (n > 0) {                        /* signed over "tag\n" + exe, so an old exe can't pass as a newer tag */
+        BCRYPT_HASH_HANDLE hh;
+        if (!BCryptCreateHash(BCRYPT_SHA256_ALG_HANDLE, &hh, NULL, 0, NULL, 0, 0)) {
+            i = !BCryptHashData(hh, (PUCHAR)tag, (ULONG)strlen(tag), 0) && !BCryptHashData(hh, (PUCHAR)"\n", 1, 0)
+                && !BCryptHashData(hh, (PUCHAR)buf, n, 0) && !BCryptFinishHash(hh, dig, 32, 0) && SigOk(dig, sig, 64);
+            BCryptDestroyHash(hh);
+        }
+    }
     SetCursor(cur);
     if (!i) {                           /* download failed or isn't signed by the release key: keep this exe */
         free(buf);
@@ -3356,7 +3378,7 @@ static DWORD WINAPI UpdCheck(LPVOID p)
     char *buf = malloc(UPCAP), tag[64];
     (void)p;
     if (buf && HttpGet("https://api.github.com/repos/beeprat/pigeon/releases/latest", buf, UPCAP) > 0
-          && JsonStr(buf, "tag_name", "", tag, sizeof tag) && strcmp(tag, PIGEON_VERSION) && strcmp(tag, g_newTag)) {
+          && JsonStr(buf, "tag_name", "", tag, sizeof tag) && VerNewer(tag, PIGEON_VERSION) && strcmp(tag, g_newTag)) {
         strcpy_s(g_newTag, sizeof g_newTag, tag);
         PostMessageW(g_main, WM_NEWVER, 0, 0);
     }

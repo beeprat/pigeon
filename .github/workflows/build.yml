@@ -40,7 +40,9 @@ jobs:
         run: |
           $k = [Security.Cryptography.CngKey]::Import([Convert]::FromBase64String($env:KEY), [Security.Cryptography.CngKeyBlobFormat]::EccPrivateBlob)
           $e = [Security.Cryptography.ECDsaCng]::new($k)
-          [IO.File]::WriteAllBytes("$PWD\pigeon.exe.sig", $e.SignData([IO.File]::ReadAllBytes("$PWD\pigeon.exe"), [Security.Cryptography.HashAlgorithmName]::SHA256))
+          # signs "tag\n" + exe, so the updater can tell an old exe from the tag it is offered as
+          $d = [Text.Encoding]::UTF8.GetBytes("$env:GITHUB_REF_NAME`n") + [IO.File]::ReadAllBytes("$PWD\pigeon.exe")
+          [IO.File]::WriteAllBytes("$PWD\pigeon.exe.sig", $e.SignData([byte[]]$d, [Security.Cryptography.HashAlgorithmName]::SHA256))
       - uses: actions/upload-artifact@v4
         with:
           name: pigeon
