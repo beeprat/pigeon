@@ -1606,6 +1606,10 @@ static void CardShow(POINT pt)
     if (x + w > mi.rcWork.right - DP(8)) x = mi.rcWork.right - DP(8) - w;
     if (x < mi.rcWork.left + DP(8)) x = mi.rcWork.left + DP(8);
     y = pt.y > (mi.rcWork.top + mi.rcWork.bottom) / 2 ? mi.rcWork.bottom - DP(8) - hh : mi.rcWork.top + DP(8);   /* taskbar below or above */
+    if (pt.y > mi.rcWork.top && pt.y < mi.rcWork.bottom) {   /* in the hidden-icons flyout: go above the icon, not behind the flyout */
+        y = pt.y - DP(24) - hh;
+        if (y < mi.rcWork.top + DP(8)) y = pt.y + DP(24);
+    }
     if (!g_card) {
         WNDCLASSEXW wc = {sizeof wc};
         wc.hInstance = GetModuleHandleW(NULL);
@@ -3742,11 +3746,13 @@ static void PopupAction(int b)
 #define IDT_SOUND 3006
 #define IDT_RECHECK 3007
 #define IDT_STARTUP 3008
+#define IDT_PROVIDERS 3009
 
-static void FakeMail(const wchar_t *from, const wchar_t *subj, const wchar_t *to)
+static void FakeMailAcc(const wchar_t *from, const wchar_t *subj, const wchar_t *to, Account *acc)
 {
     NewMail *nm = calloc(1, sizeof *nm);
     if (!nm) return;
+    nm->acc = acc;
     wcscpy_s(nm->from, 256, from);
     wcscpy_s(nm->subj, 256, subj);
     if (to) wcscpy_s(nm->to, 256, to);
@@ -3754,6 +3760,29 @@ static void FakeMail(const wchar_t *from, const wchar_t *subj, const wchar_t *to
     wcscpy_s(nm->url, 512, L"https://mail.google.com/mail/#inbox");
     GetSystemTimeAsFileTime((FILETIME *)&nm->when);
     PostMessageW(g_main, WM_NEWMAIL, 0, (LPARAM)nm);
+}
+
+static void FakeMail(const wchar_t *from, const wchar_t *subj, const wchar_t *to) { FakeMailAcc(from, subj, to, NULL); }
+
+/* One popup per provider pigeon knows, each from a made-up address on its domain, so every corner logo shows. */
+static void FakeProviders(void)
+{
+    static Account fake[sizeof g_prov / sizeof g_prov[0]];
+    size_t i, j, n = 0;
+    for (i = 0; i < sizeof g_prov / sizeof g_prov[0]; i++) {
+        Account *a = &fake[n];
+        char *star;
+        wchar_t subj[64];
+        for (j = 0; j < i && wcscmp(g_prov[j].name, g_prov[i].name); j++) ;
+        if (j < i) continue;            /* provider already shown */
+        memset(a, 0, sizeof *a);
+        a->sock = INVALID_SOCKET;       /* never connected: actions on it go nowhere */
+        sprintf_s(a->email, sizeof a->email, "test@%s", g_prov[i].dom);
+        if ((star = strchr(a->email, '*')) != NULL) strcpy_s(star, 4, "com");
+        swprintf_s(subj, 64, L"%s test", g_prov[i].name);
+        FakeMailAcc(L"Name of sender", subj, TestTo(a), a);
+        n++;
+    }
 }
 
 static INT_PTR CALLBACK TestProc(HWND d, UINT m, WPARAM w, LPARAM l)
@@ -3781,6 +3810,7 @@ static INT_PTR CALLBACK TestProc(HWND d, UINT m, WPARAM w, LPARAM l)
     case IDT_ACCOUNTS:
         for (i = 0; i < g_nacc; i++) FakeMail(L"Name of sender", L"One popup per account", TestTo(&g_acc[i]));
         break;
+    case IDT_PROVIDERS: FakeProviders(); break;
     case IDT_SOUND:  PlayNotify(); break;
     case IDT_RECHECK:   /* real mail: step back and reconnect; only unread ones pop up */
     case IDT_STARTUP: { /* same window startup scans: the last 200 mails per account */
@@ -4087,8 +4117,8 @@ LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_TRAY:
         if (LOWORD(l) == NIN_POPUPOPEN) { POINT pt = {GET_X_LPARAM(w), GET_Y_LPARAM(w)}; CardShow(pt); return 0; }
         if (LOWORD(l) == NIN_POPUPCLOSE) { if (g_card) ShowWindow(g_card, SW_HIDE); return 0; }
-        if (g_card) ShowWindow(g_card, SW_HIDE);   /* any click: the card goes */
         l = LOWORD(l);                  /* NOTIFYICON_VERSION_4: event in the low word */
+        if (g_card && l != WM_MOUSEMOVE) ShowWindow(g_card, SW_HIDE);   /* clicks hide it; hovering sends WM_MOUSEMOVE */
         if (l == WM_LBUTTONUP) {        /* inbox of the account with the most unread; Settings is in the right-click menu */
             wchar_t url[512] = L"https://mail.google.com/mail/#inbox";
             int i, best = -1;
