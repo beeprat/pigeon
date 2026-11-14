@@ -2438,27 +2438,48 @@ static void AddHint(HWND d)
     else if (_stricmp(at + 1, "gmail.com") == 0 || _stricmp(at + 1, "googlemail.com") == 0)
         wcscpy_s(hint, 200, L"Gmail detected. Needs an app password (2-Step Verification must be on).");
     else wcscpy_s(hint, 200, L"Custom domain: treated as Google Workspace. Needs an app password.");
-    {   /* only touch what changed: repainting on every keystroke flickers */
-        wchar_t old[200];
-        GetDlgItemTextW(d, IDC_HINT, old, 200);
-        if (wcscmp(old, hint) != 0) SetDlgItemTextW(d, IDC_HINT, hint);
-    }
-    if (!ms != !!IsWindowVisible(GetDlgItem(d, IDC_PASS))) {
+    wchar_t old[200];
+    int flip = !ms != !!IsWindowVisible(GetDlgItem(d, IDC_PASS));
+    GetDlgItemTextW(d, IDC_HINT, old, 200);
+    if (!flip && wcscmp(old, hint) == 0 && GetPropW(d, L"pgfit")) return;   /* nothing changed: no repaint, no flicker while typing */
+    SetPropW(d, L"pgfit", (HANDLE)1);
+    SetDlgItemTextW(d, IDC_HINT, hint);
+    if (flip) {
         ShowWindow(GetDlgItem(d, IDC_PASSLBL), ms ? SW_HIDE : SW_SHOW);
         ShowWindow(GetDlgItem(d, IDC_PASS), ms ? SW_HIDE : SW_SHOW);
         ShowWindow(GetDlgItem(d, 2003), ms ? SW_HIDE : SW_SHOW);
-        {   /* hint sits under the password, or takes its place when there is none */
-            RECT pl, pe, hr;
-            GetWindowRect(GetDlgItem(d, IDC_PASSLBL), &pl);
-            GetWindowRect(GetDlgItem(d, IDC_PASS), &pe);
-            GetWindowRect(GetDlgItem(d, IDC_HINT), &hr);
-            MapWindowPoints(NULL, d, (POINT *)&pl, 2);
-            MapWindowPoints(NULL, d, (POINT *)&pe, 2);
-            MapWindowPoints(NULL, d, (POINT *)&hr, 2);
-            SetWindowPos(GetDlgItem(d, IDC_HINT), NULL, hr.left, ms ? pl.top : pe.bottom + DP(10), 0, 0, SWP_NOSIZE | SWP_NOZORDER);
-        }
-        InvalidateRect(d, NULL, TRUE);  /* repaint the rounded field behind the password edit */
     }
+    {   /* stack: last field, hint sized to its text, buttons; window shrinks to fit */
+        HWND hh = GetDlgItem(d, IDC_HINT), last = GetDlgItem(d, ms ? IDC_EMAIL : IDC_PASS);
+        int ids[3] = {IDOK, IDCANCEL, 2003}, i, y, th = 0;
+        RECT lr, hr, br, wr;
+        GetWindowRect(last, &lr);
+        GetWindowRect(hh, &hr);
+        MapWindowPoints(NULL, d, (POINT *)&lr, 2);
+        MapWindowPoints(NULL, d, (POINT *)&hr, 2);
+        y = lr.bottom + DP(16);   /* clear of the rounded field drawn around the edit */
+        if (hint[0]) {
+            HDC dc = GetDC(hh);
+            HGDIOBJ of = SelectObject(dc, (HFONT)SendMessageW(hh, WM_GETFONT, 0, 0));
+            RECT t = {0, 0, hr.right - hr.left, 0};
+            DrawTextW(dc, hint, -1, &t, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+            SelectObject(dc, of);
+            ReleaseDC(hh, dc);
+            th = t.bottom;
+        }
+        SetWindowPos(hh, NULL, hr.left, y, hr.right - hr.left, th, SWP_NOZORDER);
+        if (th) y += th + DP(6);
+        y += DP(6);
+        for (i = 0; i < 3; i++) {
+            HWND b = GetDlgItem(d, ids[i]);
+            GetWindowRect(b, &br);
+            MapWindowPoints(NULL, d, (POINT *)&br, 2);
+            SetWindowPos(b, NULL, br.left, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+        }
+        GetWindowRect(d, &wr);
+        SetWindowPos(d, NULL, 0, 0, wr.right - wr.left, y + (br.bottom - br.top) + DP(12), SWP_NOMOVE | SWP_NOZORDER);
+    }
+    InvalidateRect(d, NULL, TRUE);      /* repaint the rounded fields after the move */
 }
 
 static INT_PTR CALLBACK AddProc(HWND d, UINT m, WPARAM w, LPARAM l)
