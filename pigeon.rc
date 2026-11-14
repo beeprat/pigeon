@@ -4,39 +4,53 @@
 1 ICON "pigeon.ico"
 1 24 "pigeon.manifest"
 
-101 DIALOGEX 0, 0, 260, 302
+101 DIALOGEX 0, 0, 272, 374
 STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_APPWINDOW
 CAPTION "pigeon settings"
 FONT 9, "Segoe UI", 400, 0, 1
 BEGIN
-    LTEXT           "Accounts (checked = notify):", -1, 8, 8, 200, 10
-    CONTROL         "", 1001, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER | LVS_NOCOLUMNHEADER | WS_TABSTOP, 10, 22, 186, 86
-    PUSHBUTTON      "Add...", 1002, 204, 20, 48, 14
-    PUSHBUTTON      "Remove", 1003, 204, 38, 48, 14
-    PUSHBUTTON      "Fix sign-in", 1018, 204, 56, 48, 14
-    LTEXT           "Popup seconds:", -1, 8, 122, 60, 10
-    EDITTEXT        1004, 74, 120, 26, 13, ES_NUMBER
-    LTEXT           "Corner:", -1, 118, 122, 30, 10
-    COMBOBOX        1009, 150, 120, 102, 80, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    AUTOCHECKBOX    "Play sound", 1005, 8, 140, 100, 10
-    AUTOCHECKBOX    "Start with Windows", 1010, 118, 140, 120, 10
-    AUTOCHECKBOX    "Hold popups during fullscreen apps", 1011, 8, 154, 200, 10
-    AUTOCHECKBOX    "Quiet hours from", 1012, 8, 170, 72, 10
-    EDITTEXT        1013, 86, 168, 20, 13, ES_NUMBER
-    LTEXT           "to", -1, 112, 170, 10, 10
-    EDITTEXT        1014, 126, 168, 20, 13, ES_NUMBER
-    LTEXT           "(hour 0-23)", -1, 154, 170, 60, 10
-    LTEXT           "Only notify from (empty = all):", -1, 8, 190, 130, 10
-    EDITTEXT        1015, 146, 188, 106, 13, ES_AUTOHSCROLL
-    LTEXT           "Never notify from:", -1, 8, 210, 130, 10
-    EDITTEXT        1016, 146, 208, 106, 13, ES_AUTOHSCROLL
-    AUTOCHECKBOX    "No popups for Promotions and Social (Gmail)", 1017, 8, 228, 240, 10
-    LTEXT           "Sound file (empty = Windows default):", -1, 8, 244, 200, 10
-    EDITTEXT        1006, 10, 257, 186, 13, ES_AUTOHSCROLL
-    PUSHBUTTON      "Browse...", 1007, 204, 256, 48, 14
-    PUSHBUTTON      "Test", 1008, 8, 280, 50, 14
-    PUSHBUTTON      "Close", IDCANCEL, 204, 280, 48, 14
+    LTEXT           "ACCOUNTS", 4100, 10, 2, 120, 9
+    LTEXT           "", 4000, 4, 13, 264, 90, NOT WS_VISIBLE
+    CONTROL         "", 1001, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER | LVS_NOCOLUMNHEADER | WS_TABSTOP, 14, 22, 182, 72
+    PUSHBUTTON      "Add...", 1002, 206, 20, 54, 15
+    PUSHBUTTON      "Remove", 1003, 206, 39, 54, 15
+    PUSHBUTTON      "Fix sign-in", 1018, 206, 58, 54, 15
+
+    LTEXT           "NOTIFICATIONS", 4101, 10, 110, 120, 9
+    LTEXT           "", 4001, 4, 121, 264, 104, NOT WS_VISIBLE
+    LTEXT           "Show popups for", -1, 14, 133, 64, 10
+    EDITTEXT        1004, 84, 131, 20, 13, ES_NUMBER
+    LTEXT           "seconds", -1, 112, 133, 40, 10
+    LTEXT           "Corner", -1, 14, 154, 40, 10
+    CONTROL         "Top left", 1021, "Button", BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 84, 149, 30, 18
+    CONTROL         "Top right", 1020, "Button", BS_AUTORADIOBUTTON, 118, 149, 30, 18
+    CONTROL         "Bottom left", 1023, "Button", BS_AUTORADIOBUTTON, 152, 149, 30, 18
+    CONTROL         "Bottom right", 1022, "Button", BS_AUTORADIOBUTTON, 186, 149, 30, 18
+    AUTOCHECKBOX    "Play sound", 1005, 14, 174, 110, 12, WS_GROUP
+    AUTOCHECKBOX    "Start with Windows", 1010, 140, 174, 120, 12
+    AUTOCHECKBOX    "Hold popups during fullscreen apps", 1011, 14, 191, 220, 12
+    AUTOCHECKBOX    "Quiet hours from", 1012, 14, 208, 78, 12
+    EDITTEXT        1013, 98, 207, 18, 13, ES_NUMBER
+    LTEXT           "to", -1, 122, 209, 10, 10
+    EDITTEXT        1014, 136, 207, 18, 13, ES_NUMBER
+    LTEXT           "(hour 0-23)", -1, 162, 209, 60, 10
+
+    LTEXT           "FILTERS", 4102, 10, 232, 120, 9
+    LTEXT           "", 4002, 4, 243, 264, 60, NOT WS_VISIBLE
+    LTEXT           "Only notify from", -1, 14, 254, 80, 10
+    EDITTEXT        1015, 102, 252, 156, 13, ES_AUTOHSCROLL
+    LTEXT           "Never notify from", -1, 14, 272, 80, 10
+    EDITTEXT        1016, 102, 270, 156, 13, ES_AUTOHSCROLL
+    AUTOCHECKBOX    "No popups for Promotions and Social (Gmail)", 1017, 14, 287, 240, 12
+
+    LTEXT           "SOUND", 4103, 10, 310, 120, 9
+    LTEXT           "", 4003, 4, 321, 264, 24, NOT WS_VISIBLE
+    EDITTEXT        1006, 14, 327, 182, 13, ES_AUTOHSCROLL
+    PUSHBUTTON      "Browse...", 1007, 206, 325, 54, 15
+
+    PUSHBUTTON      "Test popup", 1008, 4, 352, 60, 16
+    PUSHBUTTON      "Close", IDCANCEL, 208, 352, 60, 16
 END
 
 102 DIALOGEX 0, 0, 220, 116

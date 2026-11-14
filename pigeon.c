@@ -2013,7 +2013,7 @@ static const wchar_t *TestTo(const char *email)
 #define IDC_SOUNDFILE 1006
 #define IDC_BROWSE 1007
 #define IDC_TESTPOP 1008
-#define IDC_CORNER 1009
+#define IDC_CORNER0 1020          /* 1020-1023: corner radios, same order as g_corner */
 #define IDC_AUTOSTART 1010
 #define IDC_FULLHOLD 1011
 #define IDC_QUIET 1012
@@ -2088,7 +2088,23 @@ static void AutoStartSet(int on)
 
 #define FIELD RGB(22, 22, 22)       /* edits, list, buttons: same as the popup's bar buttons */
 #define INK RGB(225, 225, 225)
-static HBRUSH g_bgBrush, g_fieldBrush;
+#define CARD RGB(43, 43, 43)        /* section cards: hidden statics 4000-4099 mark where */
+#define IDC_XCLOSE 999              /* our own close button in the header */
+static HBRUSH g_bgBrush, g_fieldBrush, g_cardBrush;
+static HFONT g_hdrFont;
+
+static int IsCard(HWND c) { int id = GetDlgCtrlID(c); return id >= 4000 && id < 4100; }
+
+/* 1 if control c sits on a section card */
+static int OnCard(HWND d, HWND c)
+{
+    RECT r, k;
+    HWND x;
+    GetWindowRect(c, &r);
+    for (x = GetWindow(d, GW_CHILD); x; x = GetWindow(x, GW_HWNDNEXT))
+        if (IsCard(x) && GetWindowRect(x, &k) && r.left >= k.left && r.top >= k.top && r.right <= k.right && r.bottom <= k.bottom) return 1;
+    return 0;
+}
 
 /* Dark title bar, dark scrollbars/combos/list, flat list without a header */
 static void DarkDlg(HWND d)
@@ -2096,9 +2112,35 @@ static void DarkDlg(HWND d)
     BOOL on = TRUE;
     COLORREF cap = BG;
     HWND c;
-    if (!g_bgBrush) { g_bgBrush = CreateSolidBrush(BG); g_fieldBrush = CreateSolidBrush(FIELD); }
+    RECT wr, cr;
+    POINT o = {0, 0};
+    int dx, dy, round = 2 /* DWMWCP_ROUND */;
+    COLORREF edge = RGB(58, 58, 58);
+    if (!g_bgBrush) {
+        g_bgBrush = CreateSolidBrush(BG);
+        g_fieldBrush = CreateSolidBrush(FIELD);
+        g_cardBrush = CreateSolidBrush(CARD);
+        g_hdrFont = MakeFont(-DP(15), FW_SEMIBOLD);
+    }
     DwmSetWindowAttribute(d, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &on, sizeof on);
     DwmSetWindowAttribute(d, 35 /* DWMWA_CAPTION_COLOR, Windows 11 */, &cap, sizeof cap);
+    DwmSetWindowAttribute(d, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, &round, sizeof round);
+    DwmSetWindowAttribute(d, 34 /* DWMWA_BORDER_COLOR */, &edge, sizeof edge);
+    /* No Windows title bar: the client takes the whole window (WM_NCCALCSIZE), controls move down under our header. */
+    GetWindowRect(d, &wr);
+    ClientToScreen(d, &o);
+    dx = o.x - wr.left;
+    dy = o.y - wr.top + DP(10);
+    SetPropW(d, L"pgnh", (HANDLE)(INT_PTR)dy);
+    SetWindowPos(d, NULL, 0, 0, wr.right - wr.left, wr.bottom - wr.top + DP(10), SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    for (c = GetWindow(d, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
+        RECT r;
+        GetWindowRect(c, &r);
+        MapWindowPoints(NULL, d, (POINT *)&r, 1);
+        SetWindowPos(c, NULL, r.left + dx, r.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    }
+    GetClientRect(d, &cr);
+    CreateWindowW(L"BUTTON", L"Close", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, cr.right - DP(44), (dy - DP(30)) / 2, DP(36), DP(30), d, (HMENU)IDC_XCLOSE, g_inst, NULL);
     SendMessageW(d, WM_SETICON, ICON_SMALL, (LPARAM)g_nid.hIcon);
     for (c = GetWindow(d, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
         wchar_t cls[32];
@@ -2132,25 +2174,40 @@ static LRESULT DrawBtn(NMCUSTOMDRAW *cd)
     GetWindowTextW(h, text, 128);
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, (cd->uItemState & CDIS_DISABLED) ? RGB(110, 110, 110) : INK);
-    FillRect(dc, &r, g_bgBrush);
-    if (type == BS_CHECKBOX || type == BS_AUTOCHECKBOX) {
-        int bx = DP(15), on = SendMessageW(h, BM_GETCHECK, 0, 0) == BST_CHECKED;
-        RECT b = {r.left, (r.top + r.bottom - bx) / 2, r.left + bx, (r.top + r.bottom - bx) / 2 + bx}, in = b;
-        COLORREF fill = on ? RGB(230, 230, 230) : hot ? RGB(48, 48, 48) : FIELD;
-        if (focus || !on) {             /* thin ring: always on an empty box, so it shows on the dark field */
-            SmoothRound(dc, b, DP(4), focus ? RGB(150, 150, 150) : RGB(80, 80, 80));
-            InflateRect(&in, -DP(1), -DP(1));
-        }
-        SmoothRound(dc, in, DP(3), fill);
-        if (on) {
-            POINT pt[3] = {{b.left + bx * 24 / 100, b.top + bx * 52 / 100}, {b.left + bx * 43 / 100, b.top + bx * 70 / 100}, {b.left + bx * 76 / 100, b.top + bx * 32 / 100}};
-            HPEN pen = CreatePen(PS_SOLID, DP(2), BG), op = SelectObject(dc, pen);
-            Polyline(dc, pt, 3);
-            SelectObject(dc, op);
-            DeleteObject(pen);
-        }
-        r.left += bx + DP(6);
+    FillRect(dc, &r, OnCard(GetParent(h), h) ? g_cardBrush : g_bgBrush);
+    if (GetDlgCtrlID(h) == IDC_XCLOSE) {    /* header close: an X, a soft square on hover */
+        int c = DP(5), x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
+        HPEN pen = CreatePen(PS_SOLID, DP(1) + 1, INK), op;
+        if (hot || down) SmoothRound(dc, r, DP(6), down ? RGB(70, 70, 70) : RGB(55, 55, 55));
+        op = SelectObject(dc, pen);
+        MoveToEx(dc, x - c, y - c, NULL); LineTo(dc, x + c + 1, y + c + 1);
+        MoveToEx(dc, x + c, y - c, NULL); LineTo(dc, x - c - 1, y + c + 1);
+        SelectObject(dc, op);
+        DeleteObject(pen);
+    } else if (type == BS_CHECKBOX || type == BS_AUTOCHECKBOX) {   /* a switch */
+        int sw = DP(32), sh = DP(18), on = SendMessageW(h, BM_GETCHECK, 0, 0) == BST_CHECKED, kd = sh - DP(6), kx;
+        RECT b = {r.left, (r.top + r.bottom - sh) / 2, r.left + sw, (r.top + r.bottom - sh) / 2 + sh}, k;
+        if (focus) { RECT f = b; InflateRect(&f, DP(2), DP(2)); SmoothRound(dc, f, (sh + DP(4)) / 2, RGB(150, 150, 150)); }
+        SmoothRound(dc, b, sh / 2, on ? RGB(235, 235, 235) : hot ? RGB(95, 95, 95) : RGB(75, 75, 75));
+        kx = on ? b.right - DP(3) - kd : b.left + DP(3);
+        SetRect(&k, kx, b.top + DP(3), kx + kd, b.top + DP(3) + kd);
+        SmoothRound(dc, k, kd / 2, on ? BG : RGB(210, 210, 210));
+        r.left += sw + DP(8);
         DrawTextW(dc, text, -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX);
+    } else if (type == BS_RADIOBUTTON || type == BS_AUTORADIOBUTTON) {   /* corner picker: a little screen, dot in the corner */
+        int on = SendMessageW(h, BM_GETCHECK, 0, 0) == BST_CHECKED, k = GetDlgCtrlID(h) - IDC_CORNER0;
+        int sw = DP(20), sh = DP(14), dd = DP(5), x0 = (r.left + r.right - sw) / 2, y0 = (r.top + r.bottom - sh) / 2;
+        RECT in = r, sc = {x0, y0, x0 + sw, y0 + sh}, sci = sc, dot;
+        if (focus) { SmoothRound(dc, r, DP(8), RGB(150, 150, 150)); InflateRect(&in, -DP(1), -DP(1)); }
+        SmoothRound(dc, in, DP(7), on ? RGB(80, 80, 80) : hot ? RGB(48, 48, 48) : FIELD);
+        SmoothRound(dc, sc, DP(3), on ? INK : RGB(130, 130, 130));
+        InflateRect(&sci, -DP(1) - 1, -DP(1) - 1);
+        SmoothRound(dc, sci, DP(2), on ? RGB(80, 80, 80) : hot ? RGB(48, 48, 48) : FIELD);
+        dot.left = (k == 0 || k == 2) ? sci.right - DP(2) - dd : sci.left + DP(2);
+        dot.top = k >= 2 ? sci.bottom - DP(2) - dd : sci.top + DP(2);
+        dot.right = dot.left + dd;
+        dot.bottom = dot.top + dd;
+        SmoothRound(dc, dot, DP(1), on ? INK : RGB(150, 150, 150));
     } else {
         int def = type == BS_DEFPUSHBUTTON;
         RECT in = r;
@@ -2173,7 +2230,28 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
         PAINTSTRUCT ps;
         HDC dc = BeginPaint(d, &ps);
         HWND c;
+        int hh = (int)(INT_PTR)GetPropW(d, L"pgnh");
+        wchar_t title[64];
+        RECT tr;
         FillRect(dc, &ps.rcPaint, g_bgBrush);
+        if (hh) {                       /* header: logo and title where Windows had its title bar */
+            DrawIconEx(dc, DP(14), (hh - DP(18)) / 2, g_nid.hIcon, DP(18), DP(18), 0, NULL, DI_NORMAL);
+            GetWindowTextW(d, title, 64);
+            GetClientRect(d, &tr);
+            tr.left = DP(42);
+            tr.bottom = hh;
+            SelectObject(dc, g_hdrFont);
+            SetBkMode(dc, TRANSPARENT);
+            SetTextColor(dc, RGB(245, 245, 245));
+            DrawTextW(dc, title, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        }
+        for (c = GetWindow(d, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {   /* cards first, fields go on top */
+            RECT r;
+            if (!IsCard(c)) continue;
+            GetWindowRect(c, &r);
+            MapWindowPoints(NULL, d, (POINT *)&r, 2);
+            SmoothRound(dc, r, DP(10), CARD);
+        }
         for (c = GetWindow(d, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
             wchar_t cls[32];
             RECT r;
@@ -2191,11 +2269,35 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
     case WM_CTLCOLORDLG:
         *ret = (INT_PTR)g_bgBrush;
         return g_bgBrush != NULL;
-    case WM_CTLCOLORSTATIC:
-        SetTextColor((HDC)w, INK);
-        SetBkColor((HDC)w, BG);
-        *ret = (INT_PTR)g_bgBrush;
+    case WM_CTLCOLORSTATIC: {
+        int card = OnCard(d, (HWND)l), id = GetDlgCtrlID((HWND)l);
+        SetTextColor((HDC)w, id >= 4100 && id < 4200 ? RGB(150, 150, 150) : INK);   /* 4100-4199: section titles */
+        SetBkColor((HDC)w, card ? CARD : BG);
+        *ret = (INT_PTR)(card ? g_cardBrush : g_bgBrush);
         return g_bgBrush != NULL;
+    }
+    case WM_NCCALCSIZE:                 /* frameless once DarkDlg ran: client = whole window */
+        if (!w || !GetPropW(d, L"pgnh")) return 0;
+        SetWindowLongPtrW(d, DWLP_MSGRESULT, 0);
+        *ret = TRUE;
+        return 1;
+    case WM_NCHITTEST: {                /* drag by the header */
+        POINT pt = {(short)LOWORD(l), (short)HIWORD(l)};
+        int hh = (int)(INT_PTR)GetPropW(d, L"pgnh");
+        if (!hh) return 0;
+        ScreenToClient(d, &pt);
+        SetWindowLongPtrW(d, DWLP_MSGRESULT, pt.y >= 0 && pt.y < hh ? HTCAPTION : HTCLIENT);
+        *ret = TRUE;
+        return 1;
+    }
+    case WM_COMMAND:
+        if (LOWORD(w) != IDC_XCLOSE) return 0;
+        SendMessageW(d, WM_COMMAND, IDCANCEL, 0);
+        *ret = TRUE;
+        return 1;
+    case WM_DESTROY:
+        RemovePropW(d, L"pgnh");
+        return 0;
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX:
         SetTextColor((HDC)w, RGB(255, 255, 255));
@@ -2335,11 +2437,11 @@ static int AddAccount(HWND owner)
 /* Settings take effect as they change; Close saves them to disk. */
 static void ApplySettings(HWND d)
 {
-    int secs = (int)GetDlgItemInt(d, IDC_POPUP, NULL, FALSE), c = (int)SendDlgItemMessageW(d, IDC_CORNER, CB_GETCURSEL, 0, 0);
+    int secs = (int)GetDlgItemInt(d, IDC_POPUP, NULL, FALSE), c;
     wchar_t w[512];
     g_popupMs = (secs < 1 ? 1 : secs > 60 ? 60 : secs) * 1000;
     g_sound = IsDlgButtonChecked(d, IDC_SOUND) == BST_CHECKED;
-    if (c >= 0) g_corner = c & 3;
+    for (c = 0; c < 4; c++) if (IsDlgButtonChecked(d, IDC_CORNER0 + c) == BST_CHECKED) g_corner = c;
     GetDlgItemTextW(d, IDC_SOUNDFILE, g_soundFile, MAX_PATH);
     g_fullHold = IsDlgButtonChecked(d, IDC_FULLHOLD) == BST_CHECKED;
     g_quiet = IsDlgButtonChecked(d, IDC_QUIET) == BST_CHECKED;
@@ -2413,12 +2515,10 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
             SetDlgItemTextW(d, IDC_MUTE, w);
         }
         CheckDlgButton(d, IDC_MUTECAT, g_muteCat ? BST_CHECKED : BST_UNCHECKED);
-        {
-            static const wchar_t *corners[] = {L"Top right", L"Top left", L"Bottom right", L"Bottom left"};
-            HWND cb = GetDlgItem(d, IDC_CORNER);
-            for (i = 0; i < 4; i++) SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)corners[i]);
-            SendMessageW(cb, CB_SETCURSEL, g_corner, 0);
-        }
+        CheckDlgButton(d, IDC_CORNER0 + g_corner, BST_CHECKED);
+        SendDlgItemMessageW(d, IDC_SOUNDFILE, EM_SETCUEBANNER, TRUE, (LPARAM)L"Windows default sound");
+        SendDlgItemMessageW(d, IDC_VIP, EM_SETCUEBANNER, TRUE, (LPARAM)L"Everyone");
+        SendDlgItemMessageW(d, IDC_MUTE, EM_SETCUEBANNER, TRUE, (LPARAM)L"Nobody");
         SetForegroundWindow(d);
         init = 0;
         return TRUE;
@@ -2468,7 +2568,6 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
         }
         case IDC_TESTPOP: {
             int keep = g_sound, keepCorner = g_corner;
-            g_corner = (int)SendDlgItemMessageW(d, IDC_CORNER, CB_GETCURSEL, 0, 0) & 3;
             wchar_t keepFile[MAX_PATH];
             wcscpy_s(keepFile, MAX_PATH, g_soundFile);
             g_sound = IsDlgButtonChecked(d, IDC_SOUND) == BST_CHECKED;     /* preview what is on screen */
