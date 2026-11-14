@@ -2180,7 +2180,7 @@ static const wchar_t *TestTo(const Account *a)
 #define IDC_QUIET 1012
 #define IDC_QFROM 1013
 #define IDC_QTO 1014
-#define IDC_QFROMSPIN 1040       /* up-down arrows left of the quiet-hours times */
+#define IDC_QFROMSPIN 1040       /* up-down arrows right of the quiet-hours times */
 #define IDC_QTOSPIN 1041
 #define IDC_VIP 1015
 #define IDC_MUTE 1016
