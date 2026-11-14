@@ -3393,9 +3393,9 @@ static INT_PTR CALLBACK SettingsProc(HWND d, UINT m, WPARAM w, LPARAM l)
             POINT pt;
             int row = ((NMITEMACTIVATE *)l)->iItem, cmd;
             ListView_SetItemState(lv, row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-            AppendMenuW(pm, MF_STRING, 1, L"Set nickname...	F2");
+            AppendMenuW(pm, MF_STRING | (g_acc[RowAcc(lv, row)].primary ? MF_CHECKED : 0), 5, L"Set as primary");
             AppendMenuW(pm, MF_STRING | (g_acc[RowAcc(lv, row)].muted ? MF_CHECKED : 0), 4, L"Mute popups");
-            AppendMenuW(pm, MF_STRING | (g_acc[RowAcc(lv, row)].primary ? MF_CHECKED : 0), 5, L"Primary (tray click opens it)");
+            AppendMenuW(pm, MF_STRING, 1, L"Set nickname...	F2");
             AppendMenuW(pm, MF_STRING, 2, L"Fix sign-in");
             AppendMenuW(pm, MF_SEPARATOR, 0, NULL);
             AppendMenuW(pm, MF_STRING, 3, L"Remove");
