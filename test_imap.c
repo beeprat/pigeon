@@ -112,6 +112,13 @@ int main(void)
             printf("%-16s %-24s %d\n", mails[k], Prov(mails[k])->host, r);
         }
     }
+    {   /* INTERNALDATE: offset applied, 15:33:01 +0100 == 14:33:01 UTC */
+        SYSTEMTIME st = {2026, 11, 0, 14, 14, 33, 1, 0};
+        FILETIME ft;
+        SystemTimeToFileTime(&st, &ft);
+        assert(ImapDate("* 1 FETCH (UID 5 INTERNALDATE \"14-Nov-2026 15:33:01 +0100\" FLAGS ())") == (((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime));
+        assert(ImapDate("* 1 FETCH (UID 5)") == 0);
+    }
     printf("all ok\n");
     return 0;
 }

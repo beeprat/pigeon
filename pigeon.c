@@ -621,7 +621,8 @@ static int g_bar, g_barOn;      /* button bar: current height in px, sliding ope
 static HFONT g_fontIcon, g_fontIconS;   /* g_fontIconS: the small close cross */
 static int g_hot = -1;          /* button under the mouse */
 static int g_snzMode;           /* bar shows snooze times instead of actions */
-typedef struct { wchar_t from[256], subj[256], url[512], to[256], prev[300]; Account *acc; unsigned long uid; } NewMail;
+typedef struct { wchar_t from[256], subj[256], url[512], to[256], prev[300]; Account *acc; unsigned long uid;
+                 ULONGLONG when; } NewMail;   /* when: server receive time, FILETIME UTC; 0 = unknown */
 static NewMail g_cur;           /* mail shown in the popup now */
 static void PopupAction(int b);
 static void ShowNext(void);
@@ -682,6 +683,7 @@ static void DrawLogo(HDC dc, int x, int y, int w, int h)
 }
 
 static HFONT MakeFont(int h, int weight);
+static int TextW(HFONT f, const wchar_t *t);
 
 /* Gmail-style letter avatar: colored circle with the sender's initial, small provider badge bottom right
    (kind: Gmail logo for 0, blue "O" for Microsoft, none otherwise) */
@@ -1064,7 +1066,33 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
             of = SelectObject(dc, g_font);
             SetTextColor(dc, Gr(190));
             tr.top = ty; tr.bottom = ty + g_h1;
-            DrawTextW(dc, g_text, -1, &tr, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            {
+                wchar_t tm[48] = L"";
+                RECT nr = tr;
+                int tw = 0;
+                if (g_cur.when) {               /* " · 15:33", or " · Nov 12, 15:33" if not today */
+                    FILETIME u = {(DWORD)g_cur.when, (DWORD)(g_cur.when >> 32)}, lf;
+                    SYSTEMTIME lt, now;
+                    wchar_t dt[24] = L"", hm[16];
+                    FileTimeToLocalFileTime(&u, &lf);
+                    FileTimeToSystemTime(&lf, &lt);
+                    GetLocalTime(&now);
+                    if (lt.wYear != now.wYear || lt.wMonth != now.wMonth || lt.wDay != now.wDay)
+                        GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, 0, &lt, L"MMM d, ", dt, 24, NULL);
+                    GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, TIME_NOSECONDS, &lt, NULL, hm, 16);
+                    swprintf_s(tm, 48, L"  \x00b7  %s%s", dt, hm);
+                    tw = TextW(g_font, tm);
+                }
+                nr.right -= tw + DP(20);        /* room for the time and the close cross */
+                DrawTextW(dc, g_text, -1, &nr, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX | DT_CALCRECT);
+                if (nr.right > tr.right - tw - DP(20)) nr.right = tr.right - tw - DP(20);
+                DrawTextW(dc, g_text, -1, &nr, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                if (tw) {
+                    RECT r2 = {nr.right, tr.top, nr.right + tw, tr.bottom};
+                    SetTextColor(dc, Gr(130));
+                    DrawTextW(dc, tm, -1, &r2, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+                }
+            }
             SelectObject(dc, g_subjHot ? g_fontBigU : g_fontBig);
             SetTextColor(dc, Gr(255));
             tr.top = tr.bottom; tr.bottom = tr.top + g_h2;
@@ -1797,6 +1825,25 @@ static void Snippet(const char *hdr, const char *body, int blen, wchar_t *out, i
 }
 
 /* "From"/"Subject" out of a raw header block (folded lines joined). */
+/* INTERNALDATE "14-Nov-2026 15:33:01 +0100" -> FILETIME UTC, 0 if missing */
+static ULONGLONG ImapDate(const char *s)
+{
+    static const char mon[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    SYSTEMTIME st = {0};
+    FILETIME ft;
+    char m[4], sign;
+    int d, y, hh, mm, ss, oh, om;
+    const char *p = s ? strstr(s, "INTERNALDATE \"") : NULL, *f;
+    if (!p || sscanf_s(p + 14, "%d-%3c-%d %d:%d:%d %c%2d%2d", &d, m, 3, &y, &hh, &mm, &ss, &sign, 1, &oh, &om) != 9) return 0;
+    m[3] = 0;
+    if (!(f = strstr(mon, m))) return 0;
+    st.wYear = (WORD)y; st.wMonth = (WORD)((f - mon) / 3 + 1); st.wDay = (WORD)d;
+    st.wHour = (WORD)hh; st.wMinute = (WORD)mm; st.wSecond = (WORD)ss;
+    if (!SystemTimeToFileTime(&st, &ft)) return 0;
+    return (((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime)
+           - (sign == '-' ? -1LL : 1LL) * (oh * 60 + om) * 600000000LL;
+}
+
 static void HeaderField(char *hdr, const char *name, wchar_t *out, int cap)
 {
     char val[1024];
@@ -1851,7 +1898,7 @@ static int FetchNew(Tls *t)
         }
     }
 
-    sprintf_s(cmd, sizeof cmd, "UID FETCH %lu:* (UID FLAGS%s BODY.PEEK[HEADER.FIELDS (FROM SUBJECT CONTENT-TYPE CONTENT-TRANSFER-ENCODING)])", t->acc->uidnext, gm ? " X-GM-THRID" : "");
+    sprintf_s(cmd, sizeof cmd, "UID FETCH %lu:* (UID FLAGS INTERNALDATE%s BODY.PEEK[HEADER.FIELDS (FROM SUBJECT CONTENT-TYPE CONTENT-TRANSFER-ENCODING)])", t->acc->uidnext, gm ? " X-GM-THRID" : "");
     if (!Cmd(t, cmd, tag)) return 0;
     tl = strlen(tag);
     for (;;) {
@@ -1889,6 +1936,7 @@ static int FetchNew(Tls *t)
             strcpy_s(bestHdr + 1, sizeof bestHdr - 1, hdr);
             HeaderField(hdr, "From", best->from, 256);
             HeaderField(hdr, "Subject", best->subj, 256);
+            best->when = ImapDate(strstr(line, "INTERNALDATE \"") ? line : rest);
             NameOnly(best->from);
             if (thr) swprintf_s(best->url, 512, L"https://mail.google.com/mail/?authuser=%hs#all/%llx", t->acc->email, thr);
             else InboxUrl(t->acc->email, best->url);
@@ -3189,8 +3237,9 @@ static void Snooze(int minutes)
 /* b: 0 seen, 1 archive, 2 star, 3 snooze, NBTN close */
 static void PopupAction(int b)
 {
-    if (b == NBTN) {                    /* close cross */
-        HidePopup(g_popup);
+    if (b == NBTN) {                    /* close cross: same fade as timing out */
+        KillTimer(g_popup, TIMER_HIDE);
+        SetTimer(g_popup, TIMER_FADE, 30, NULL);
         return;
     }
     if (g_snzMode) {                    /* second click: one of the snooze times */
@@ -3238,6 +3287,7 @@ static void FakeMail(const wchar_t *from, const wchar_t *subj, const wchar_t *to
     if (to) wcscpy_s(nm->to, 256, to);
     wcscpy_s(nm->prev, 300, L"Hi! Just checking in about tomorrow, are we still on for lunch?");
     wcscpy_s(nm->url, 512, L"https://mail.google.com/mail/#inbox");
+    GetSystemTimeAsFileTime((FILETIME *)&nm->when);
     PostMessageW(g_main, WM_NEWMAIL, 0, (LPARAM)nm);
 }
 
