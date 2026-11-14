@@ -2165,6 +2165,24 @@ static void DarkDlg(HWND d)
             SetWindowLongW(c, GWL_STYLE, GetWindowLongW(c, GWL_STYLE) & ~WS_BORDER);
             SetWindowLongW(c, GWL_EXSTYLE, GetWindowLongW(c, GWL_EXSTYLE) & ~WS_EX_CLIENTEDGE);
             SetWindowPos(c, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+            if (!lv) {   /* single-line edits draw text at the top: shrink to text height, centered in the old box */
+                HDC dc = GetDC(c);
+                HGDIOBJ of = SelectObject(dc, (HFONT)SendMessageW(c, WM_GETFONT, 0, 0));
+                TEXTMETRICW tm;
+                RECT r;
+                int th, pad;
+                GetTextMetricsW(dc, &tm);
+                SelectObject(dc, of);
+                ReleaseDC(c, dc);
+                GetWindowRect(c, &r);
+                MapWindowPoints(NULL, d, (POINT *)&r, 2);
+                th = tm.tmHeight;
+                pad = (r.bottom - r.top - th) / 2;
+                if (pad > 0) {
+                    SetWindowPos(c, NULL, r.left, r.top + pad, r.right - r.left, th, SWP_NOZORDER);
+                    SetPropW(c, L"pgpad", (HANDLE)(INT_PTR)pad);
+                }
+            }
         }
         if (lv) {
             ListView_SetBkColor(c, FIELD);
@@ -2192,14 +2210,16 @@ static LRESULT DrawBtn(NMCUSTOMDRAW *cd)
     SetTextColor(dc, (cd->uItemState & CDIS_DISABLED) ? RGB(110, 110, 110) : INK);
     FillRect(dc, &r, OnCard(GetParent(h), h) ? g_cardBrush : g_bgBrush);
     if (GetDlgCtrlID(h) == IDC_XCLOSE) {    /* header close: an X, a soft square on hover */
-        int c = DP(5), x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
-        HPEN pen = CreatePen(PS_SOLID, DP(1) + 1, INK), op;
+        /* X from square dots on both diagonals: mirror-exact */
+        int n = DP(10), t = DP(1) + 1, x0 = (r.left + r.right - n - t) / 2, y0 = (r.top + r.bottom - n - t) / 2, i;
+        HBRUSH ink = CreateSolidBrush(INK);
         if (hot || down) SmoothRound(dc, r, DP(6), down ? RGB(70, 70, 70) : RGB(55, 55, 55));
-        op = SelectObject(dc, pen);
-        MoveToEx(dc, x - c, y - c, NULL); LineTo(dc, x + c + 1, y + c + 1);
-        MoveToEx(dc, x + c, y - c, NULL); LineTo(dc, x - c - 1, y + c + 1);
-        SelectObject(dc, op);
-        DeleteObject(pen);
+        for (i = 0; i <= n; i++) {
+            RECT p1 = {x0 + i, y0 + i, x0 + i + t, y0 + i + t}, p2 = {x0 + n - i, y0 + i, x0 + n - i + t, y0 + i + t};
+            FillRect(dc, &p1, ink);
+            FillRect(dc, &p2, ink);
+        }
+        DeleteObject(ink);
     } else if (type == BS_CHECKBOX || type == BS_AUTOCHECKBOX) {   /* a switch */
         int sw = DP(32), sh = DP(18), on = SendMessageW(h, BM_GETCHECK, 0, 0) == BST_CHECKED, kd = sh - DP(6), kx;
         RECT b = {r.left, (r.top + r.bottom - sh) / 2, r.left + sw, (r.top + r.bottom - sh) / 2 + sh}, k;
@@ -2283,6 +2303,18 @@ static LRESULT CALLBACK LvProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, 
         if (cd->hdr.hwndFrom == ListView_GetHeader(h)) {
             if (cd->hdr.code == NM_CUSTOMDRAW)
                 return cd->dwDrawStage == CDDS_PREPAINT ? CDRF_NOTIFYITEMDRAW : cd->dwDrawStage == CDDS_ITEMPREPAINT ? DrawHdr(cd) : CDRF_DODEFAULT;
+            if (cd->hdr.code == HDN_ITEMCHANGINGW && (((NMHEADERW *)l)->pitem->mask & HDI_WIDTH)) {
+                /* keep all columns inside the list: never a horizontal scrollbar */
+                NMHEADERW *nh = (NMHEADERW *)l;
+                RECT rc;
+                int i, others = 0, n = Header_GetItemCount(cd->hdr.hwndFrom), lim;
+                GetClientRect(h, &rc);
+                for (i = 0; i < n; i++) if (i != nh->iItem) others += ListView_GetColumnWidth(h, i);
+                lim = rc.right - others;
+                if (nh->pitem->cxy > lim) nh->pitem->cxy = lim;
+                if (nh->pitem->cxy < DP(40)) nh->pitem->cxy = DP(40);
+                if (nh->pitem->cxy > lim) return TRUE;
+            }
             if (cd->hdr.code == HDN_ITEMCHANGEDW || cd->hdr.code == HDN_ENDDRAG) {   /* resized/moved: no leftover lines */
                 LRESULT r = DefSubclassProc(h, m, w, l);
                 RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
@@ -2331,7 +2363,7 @@ static int DarkMsg(HWND d, UINT m, WPARAM w, LPARAM l, INT_PTR *ret)
             if (!IsWindowVisible(c) || (_wcsicmp(cls, L"Edit") != 0 && _wcsicmp(cls, WC_LISTVIEWW) != 0)) continue;
             GetWindowRect(c, &r);
             MapWindowPoints(NULL, d, (POINT *)&r, 2);
-            InflateRect(&r, DP(5), DP(3));
+            InflateRect(&r, DP(5), DP(3) + (int)(INT_PTR)GetPropW(c, L"pgpad"));
             SmoothRound(dc, r, DP(8), FIELD);
         }
         EndPaint(d, &ps);
