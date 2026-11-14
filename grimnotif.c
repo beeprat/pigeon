@@ -2211,12 +2211,12 @@ static HICON BadgeIcon(HICON base, int n)
     bi.bmiHeader.biHeight = -sz;            /* top-down */
     bi.bmiHeader.biPlanes = 1;
     bi.bmiHeader.biBitCount = 32;
-    px32 = calloc(sz * sz, 4);
+    px32 = calloc((size_t)sz * sz, 4);
     if (!px32 || !GetIconInfo(base, &ii)) goto done;
     GetDIBits(dc, ii.hbmColor, 0, sz, px32, &bi, DIB_RGB_COLORS);
     for (i = 0; i < sz * sz && !px32[i * 4 + 3]; i++);
     if (i == sz * sz) {                     /* icon without alpha: take it from the mask */
-        BYTE *mk = calloc(sz * sz, 4);
+        BYTE *mk = calloc((size_t)sz * sz, 4);
         if (mk) {
             GetDIBits(dc, ii.hbmMask, 0, sz, mk, &bi, DIB_RGB_COLORS);
             for (i = 0; i < sz * sz; i++) px32[i * 4 + 3] = mk[i * 4] ? 0 : 255;
@@ -2281,7 +2281,7 @@ static HICON BadgeIcon(HICON base, int n)
         mask = CreateBitmap(sz, sz, 1, 1, NULL);
         if (col && mask) {
             BYTE *zero = calloc(((sz + 15) / 16) * 2, sz);
-            memcpy(cb, px32, sz * sz * 4);
+            memcpy(cb, px32, (size_t)sz * sz * 4);
             if (zero) { SetBitmapBits(mask, ((sz + 15) / 16) * 2 * sz, zero); free(zero); }
             ii.fIcon = TRUE;
             ii.xHotspot = ii.yHotspot = 0;
