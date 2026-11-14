@@ -40,6 +40,7 @@
 #define TIMER_FADE 3
 #define TIMER_FADEIN 4
 #define TIMER_BAR 5
+#define TIMER_TIP 8              /* popup: show the button tooltip after a rest */
 #define TIMER_QUIET 7            /* main window: checks once a minute whether quiet hours ended */
 #define TIMER_DND 6              /* main window: retry held popups once the fullscreen app is gone */
 static int g_dwm;               /* 1 = Windows 11 draws corners, border and shadow */
@@ -974,8 +975,16 @@ static void BtnTip(HWND h, int b)
     static TTTOOLINFOW ti;
     RECT r;
     if (!tip) {
+        int round = 2 /* DWMWCP_ROUND */;
+        COLORREF edge = Gr(75);
+        RECT m = {DP(6), DP(3), DP(6), DP(3)};
         tip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
                               0, 0, 0, 0, h, NULL, g_inst, NULL);
+        SetWindowTheme(tip, L"", L"");         /* unthemed, so our colors apply */
+        DwmSetWindowAttribute(tip, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, &round, sizeof round);
+        DwmSetWindowAttribute(tip, 34 /* DWMWA_BORDER_COLOR */, &edge, sizeof edge);
+        SendMessageW(tip, WM_SETFONT, (WPARAM)g_fontSmall, FALSE);
+        SendMessageW(tip, TTM_SETMARGIN, 0, (LPARAM)&m);
         ti.cbSize = sizeof ti;
         ti.uFlags = TTF_TRACK | TTF_ABSOLUTE;
         ti.hwnd = h;
@@ -983,6 +992,8 @@ static void BtnTip(HWND h, int b)
         SendMessageW(tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
     }
     if (b < 0 || b >= NBTN) { SendMessageW(tip, TTM_TRACKACTIVATE, FALSE, (LPARAM)&ti); return; }
+    SendMessageW(tip, TTM_SETTIPBKCOLOR, Gr(43), 0);    /* every time: light/dark may have switched */
+    SendMessageW(tip, TTM_SETTIPTEXTCOLOR, Gr(225), 0);
     ti.lpszText = (wchar_t *)(g_snzMode ? snz[b] : act[b]);
     SendMessageW(tip, TTM_UPDATETIPTEXTW, 0, (LPARAM)&ti);
     r = BtnRect(h, b);
@@ -1099,7 +1110,7 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         int b = BtnAt(h, (short)LOWORD(l), (short)HIWORD(l) - VisTop());
         POINT pt = {(short)LOWORD(l), (short)HIWORD(l) - VisTop()};
         int sh = PtInRect(&g_subjRect, pt);
-        if (b != g_hot || sh != g_subjHot) { g_hot = b; g_subjHot = sh; BtnTip(h, b); InvalidateRect(h, NULL, FALSE); }
+        if (b != g_hot || sh != g_subjHot) { g_hot = b; g_subjHot = sh; BtnTip(h, -1); if (b >= 0) SetTimer(h, TIMER_TIP, 2000, NULL); else KillTimer(h, TIMER_TIP); InvalidateRect(h, NULL, FALSE); }
         if (!g_hover) {                         /* hold the popup while the mouse is on it */
             TRACKMOUSEEVENT te;
             te.cbSize = sizeof te;
@@ -1148,6 +1159,7 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (IsWindowVisible(h)) SetTimer(h, TIMER_HIDE, 2000, NULL);
         return 0;
     case WM_TIMER:
+        if (w == TIMER_TIP) { KillTimer(h, TIMER_TIP); if (g_hover) BtnTip(h, g_hot); return 0; }
         if (w == TIMER_BAR) {               /* ease out: a third of the way each tick, about 0.15 s */
             int t = g_barOn ? DP(BAR) : 0, d = (t - g_bar) / 3;
             if (!d) d = t > g_bar ? 1 : -1;
@@ -3198,7 +3210,8 @@ static void PopupAction(int b)
         Snooze(mins[b]);
     } else if (b == 3) {                /* bar turns into the snooze times; leaving the popup turns it back */
         g_snzMode = 1;
-        BtnTip(g_popup, b);
+        BtnTip(g_popup, -1);
+        SetTimer(g_popup, TIMER_TIP, 2000, NULL);
         InvalidateRect(g_popup, NULL, FALSE);
         return;
     } else if (g_cur.acc && g_cur.uid) {
