@@ -217,15 +217,15 @@ typedef struct {
     int kind;
     const wchar_t *name;        /* shown in Settings' Provider column */
     COLORREF badge;             /* popup avatar's corner logo: rounded square in this color... */
-    const wchar_t *mark;        /* ...with this text; "" = Gmail's own logo, "~" = a cloud */
+    const wchar_t *mark;        /* ...with this text; "" = Gmail's own logo, "~" = a cloud; badge CLR_NONE = bare text */
     COLORREF ink;
 } Provider;
 static const Provider g_prov[] = {
     {"gmail.com",      "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0, L"Gmail", 0, L"", 0},
     {"googlemail.com", "imap.gmail.com",       "", "https://myaccount.google.com/apppasswords", 0, L"Gmail", 0, L"", 0},
-    {"yahoo.*",        "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", RGB(96, 1, 210), L"Y!", RGB(255, 255, 255)},
-    {"ymail.com",      "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", RGB(96, 1, 210), L"Y!", RGB(255, 255, 255)},
-    {"rocketmail.com", "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", RGB(96, 1, 210), L"Y!", RGB(255, 255, 255)},
+    {"yahoo.*",        "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", CLR_NONE, L"Y!", RGB(96, 1, 210)},
+    {"ymail.com",      "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", CLR_NONE, L"Y!", RGB(96, 1, 210)},
+    {"rocketmail.com", "imap.mail.yahoo.com",  "https://mail.yahoo.com/", "https://login.yahoo.com/account/security/app-passwords", 1, L"Yahoo", CLR_NONE, L"Y!", RGB(96, 1, 210)},
     {"aol.com",        "imap.aol.com",         "https://mail.aol.com/", "https://login.aol.com/account/security/app-passwords", 1, L"AOL", RGB(51, 102, 255), L"Aol", RGB(255, 255, 255)},
     {"icloud.com",     "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1, L"iCloud", RGB(0, 122, 255), L"~", RGB(255, 255, 255)},
     {"me.com",         "imap.mail.me.com",     "https://www.icloud.com/mail", "https://account.apple.com/account/manage", 1, L"iCloud", RGB(0, 122, 255), L"~", RGB(255, 255, 255)},
@@ -734,14 +734,16 @@ static void DrawAvatar(HDC dc, int x, int y, int d, const wchar_t *name, const P
         b = CreateSolidBrush(pv->badge);
         SelectObject(m, pen);
         SelectObject(m, b);
-        RoundRect(m, br.left, br.top, br.right, br.bottom, lw / 3, lw / 3);
-        SelectObject(m, GetStockObject(NULL_PEN));
-        RoundRect(m, br.left, br.top, br.right + 1, br.bottom + 1, lw / 3, lw / 3);
+        if (pv->badge != CLR_NONE) {
+            RoundRect(m, br.left, br.top, br.right, br.bottom, lw / 3, lw / 3);
+            SelectObject(m, GetStockObject(NULL_PEN));
+            RoundRect(m, br.left, br.top, br.right + 1, br.bottom + 1, lw / 3, lw / 3);
+        }
         SelectObject(m, GetStockObject(NULL_BRUSH));
         DeleteObject(b);
         DeleteObject(pen);
         if (wcscmp(pv->mark, L"~") == 0) {   /* cloud: three bumps on a flat base */
-            int u = lw / 12, cx = br.left + lw / 2, cy = br.top + lw * 55 / 100;
+            int u = lw / 12, cx = br.left + lw / 2, cy = br.top + lw / 2 + 3 * u / 2;   /* shape spans cy-5u..cy+2u: centered */
             b = CreateSolidBrush(pv->ink);
             SelectObject(m, b);
             Ellipse(m, cx - 5 * u, cy - 2 * u, cx - u, cy + 2 * u + 1);
@@ -752,8 +754,19 @@ static void DrawAvatar(HDC dc, int x, int y, int d, const wchar_t *name, const P
             DeleteObject(b);
         } else {
             int len = (int)wcslen(pv->mark);   /* longer marks get a smaller font so they fit */
-            f = MakeFont(-lw * (len == 1 ? 70 : len == 2 ? 55 : 38) / 100, FW_BOLD);
+            f = MakeFont(-lw * (pv->badge == CLR_NONE ? 85 : len == 1 ? 70 : len == 2 ? 55 : 38) / 100, FW_BOLD);
             of = SelectObject(m, f);
+            if (pv->badge == CLR_NONE) {       /* bare text: BG-colored outline like the Gmail logo */
+                int dx, dy;
+                SetTextColor(m, BG);
+                for (dx = -ow; dx <= ow; dx += ow / 4)     /* stamp a filled disc of offsets */
+                    for (dy = -ow; dy <= ow; dy += ow / 4) {
+                        RECT o = br;
+                        if (dx * dx + dy * dy > ow * ow) continue;
+                        OffsetRect(&o, dx, dy);
+                        DrawTextW(m, pv->mark, -1, &o, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                    }
+            }
             SetTextColor(m, pv->ink);
             DrawTextW(m, pv->mark, -1, &br, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
             SelectObject(m, of);
