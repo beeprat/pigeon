@@ -1057,9 +1057,15 @@ static void DrawButtons(HWND h, HDC dc)
 }
 
 /* Grows the popup by the button bar while hovered; bottom corners grow upward */
+static int g_barFrom;             /* bar height when the slide started */
+static ULONGLONG g_barT0;         /* and when */
+#define BAR_MS 220
+
 static void HoverSize(HWND h, int on)
 {
     g_barOn = on;
+    g_barFrom = g_bar;
+    g_barT0 = GetTickCount64();
     SetTimer(h, TIMER_BAR, 10, NULL);   /* the timer slides it */
 }
 
@@ -1368,11 +1374,13 @@ LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l)
         return 0;
     case WM_TIMER:
         if (w == TIMER_TIP) { KillTimer(h, TIMER_TIP); if (g_hover && !g_anim && g_alpha == 255) BtnTip(h, g_hot); return 0; }
-        if (w == TIMER_BAR) {               /* ease out: a third of the way each tick, about 0.15 s */
-            int t = g_barOn ? BARH : 0, d = (t - g_bar) / 3;
-            if (!d) d = t > g_bar ? 1 : -1;
-            g_bar = t == g_bar ? t : g_bar + d;
-            if (g_bar == t) KillTimer(h, TIMER_BAR);
+        if (w == TIMER_BAR) {               /* ease in-out over BAR_MS: no big first step when the preview adds height */
+            int t = g_barOn ? BARH : 0;
+            double q = (double)(GetTickCount64() - g_barT0) / BAR_MS;
+            if (q > 1) q = 1;
+            q = q < 0.5 ? 4 * q * q * q : 1 - 4 * (1 - q) * (1 - q) * (1 - q);
+            g_bar = g_barFrom + (int)((t - g_barFrom) * q + (t > g_barFrom ? 0.5 : -0.5));
+            if (q >= 1) { g_bar = t; KillTimer(h, TIMER_BAR); }
             ApplyBar(h);
             InvalidateRect(h, NULL, FALSE);
         } else if (w == TIMER_HIDE) {
