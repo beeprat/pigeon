@@ -1,0 +1,9 @@
+*.obj
+*.exe
+*.res
+*.pdb
+*.ilk
+*.lib
+*.exp
+corpus/
+crash-*

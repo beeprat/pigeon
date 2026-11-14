@@ -1,0 +1,27 @@
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+          queries: security-extended
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Build
+        shell: cmd
+        run: cl /nologo /c /W3 /D_CRT_SECURE_NO_WARNINGS /DUNICODE /D_UNICODE grimnotif.c
+      - uses: github/codeql-action/analyze@v3

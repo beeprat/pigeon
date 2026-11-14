@@ -1,0 +1,51 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write        # create the release on tags
+      id-token: write        # build provenance
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Test
+        shell: cmd
+        run: |
+          cl /nologo /utf-8 /DUNICODE /D_UNICODE /D_CRT_SECURE_NO_WARNINGS /W3 test_imap.c
+          test_imap.exe
+      - name: Build
+        shell: cmd
+        run: |
+          rc /nologo /fo grimnotif.res grimnotif.rc
+          cl /nologo /MT /O1 /W3 /sdl /guard:cf /D_CRT_SECURE_NO_WARNINGS /DUNICODE /D_UNICODE grimnotif.c grimnotif.res /link /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /CETCOMPAT /guard:cf /OUT:grimnotif.exe
+      - name: Checksum
+        shell: pwsh
+        run: (Get-FileHash grimnotif.exe -Algorithm SHA256).Hash.ToLower() + "  grimnotif.exe" | Out-File -Encoding ascii grimnotif.exe.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grimnotif
+          path: |
+            grimnotif.exe
+            grimnotif.exe.sha256
+      - name: Attest
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: grimnotif.exe
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME grimnotif.exe grimnotif.exe.sha256 --generate-notes
